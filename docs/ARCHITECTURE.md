@@ -5,7 +5,7 @@
 Everything revolves around one validated document, the **SceneSpec** (`packages/shared/src/scene.ts`): the models a scene needs, where each instance stands, movement keyframes, skeletal clips, procedural motion, cameras, shots, lights and the sky. Gemini writes it, the editor edits it, Blender renders it.
 
 - It is **data, not code.** Gemini answers through constrained JSON output; the Worker parses that again with zod and repairs or rejects it (`normalizeScene`). The render service validates the scene a third time, independently, and maps it onto fixed Blender operations. Nothing Gemini produces is ever executed.
-- **Preview equals render.** What a scene means at time *t* is defined once, in `packages/shared/src/interp.ts`. The browser preview calls it directly; `services/renderer/kivo_renderer/sampling.py` is a line-for-line port, and a shared fixture test fails if they ever disagree.
+- **Preview equals render.** What a scene means at time *t* is defined once, in `packages/shared/src/interp.ts`. The browser preview calls it directly; `services/renderer/kivo_renderer/sampling.py` is a line-for-line port, and a shared fixture test fails if they ever disagree. Motion, framing and the edit therefore match exactly. Lighting is approximate in the preview (a real-time rasteriser against Cycles path tracing); both meter exposure automatically to the same brightness targets.
 - Conventions: Y-up, metres, degrees, seconds; characters face +Z at zero rotation; the ground is y = 0. Each model is normalised to the real-world size the scene asks for, so Gemini never needs to know a mesh's raw dimensions.
 
 ## The pipeline
@@ -20,7 +20,7 @@ A generation is a row in `jobs` advanced by queue messages. Each delivery takes 
 | 4 | Preparing textures | Text to 3D *refine* tasks; GLBs and thumbnails are copied into R2 |
 | 5 | Rigging characters | Meshy rigging for humanoids, then library clips (and optional Text to Motion) |
 | 6 | Creating animations | Gemini places objects and choreographs them, knowing which clips really exist |
-| 7 | Adjusting cameras | Gemini designs cameras, the edit and lighting against the sampled motion; cameras are moved out of models and above ground |
+| 7 | Adjusting cameras | Gemini designs cameras, the edit and lighting against the sampled motion; then code moves cameras out of models and above ground, and matches walk/run clips and their speed to how fast each character really travels |
 | 8 | Preparing rendering | The export is clamped to the plan; a render job is queued with the plan's priority |
 | 9 | Rendering video | A render worker reports frames rendered — the only percentage shown |
 | 10 | Encoding MP4 | ffmpeg → H.264, yuv420p, faststart |

@@ -222,8 +222,10 @@ export function motionSummary(objects: SceneObject[], tracks: Track[], assets: S
     .map((o) => {
       const a = assetById.get(o.assetId);
       const size = a ? `${Math.round(a.size.meters * o.scale * 10) / 10} m ${a.size.axis}` : "";
-      if (!moving.has(o.id)) return `- ${o.id} (${a?.kind ?? "object"}, ${size}): stays at ${fmt(o.position)}`;
-      const path = times.map((t) => `${t}s ${fmt(sampler.sampleObject(o.id, t).position)}`).join(" → ");
+      const facing = (t: number) => `${Math.round(((sampler.sampleObject(o.id, t).rotation[1] % 360) + 360) % 360)}°`;
+      const character = a?.kind === "character" || a?.kind === "creature";
+      if (!moving.has(o.id)) return `- ${o.id} (${a?.kind ?? "object"}, ${size}): stays at ${fmt(o.position)}${character ? `, facing ${facing(0)}` : ""}`;
+      const path = times.map((t) => `${t}s ${fmt(sampler.sampleObject(o.id, t).position)}${character ? ` facing ${facing(t)}` : ""}`).join(" → ");
       return `- ${o.id} (${a?.kind ?? "object"}, ${size}): MOVES ${path}`;
     })
     .join("\n");
@@ -253,6 +255,7 @@ CAMERAS
   To orbit an object, use follow with 5 or more keyframes placed around a circle (smooth true, easing "linear").
 - Framing distance: to fit a subject of height H with a little headroom at fov F, stand about H × 1.4 / (2 × tan(F/2)) away. For H = 1.7 and F = 40 that is about 3.3 m.
 - Keep every camera at least 0.3 m above the ground, outside all models, and with a clear line of sight to its subject. Do not put the camera behind buildings.
+- "facing" in the staging is a character's heading (0° faces +Z, 90° faces +X). When a character greets, looks at or reacts to the viewer, put the camera in FRONT of it — along its facing direction — so its face and gesture are seen, not its back.
 - Camera keyframe times are in video time (seconds from the start of the video), and a camera only needs keyframes covering the shots that use it.
 
 SHOTS
