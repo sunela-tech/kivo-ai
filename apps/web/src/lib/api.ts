@@ -226,6 +226,7 @@ export interface AppConfig {
   plans: Plan[];
   stages: { id: StageId; label: string; detail: string }[];
   styles: { id: string; label: string; promptHint: string }[];
+  storageReady: boolean;
 }
 
 export function formatBytes(n: number): string {

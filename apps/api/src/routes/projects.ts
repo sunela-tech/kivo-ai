@@ -23,7 +23,7 @@ import { loadProject, loadScene, saveScene, type JobRow, type ProjectRow } from 
 import { enqueue, provisionAssets, type JobState } from "../pipeline/run";
 import { rateLimit } from "../ratelimit";
 import { reserveVideo, usageSummary, recordCost } from "../usage";
-import { HttpError, PipelineError, newId, now } from "../util";
+import { HttpError, PipelineError, bucket, newId, now } from "../util";
 
 export const projects = new Hono<AppBindings>();
 projects.use("*", requireUser);
@@ -145,11 +145,13 @@ export async function deleteProject(env: Env, project: ProjectRow): Promise<void
   )
     .bind(project.id, project.id)
     .all<{ id: string; user_id: string }>();
-  for (const asset of orphans.results) {
-    const listed = await env.BUCKET.list({ prefix: `users/${asset.user_id}/assets/${asset.id}/` });
-    keys.push(...listed.objects.map((o) => o.key));
+  if (env.BUCKET) {
+    for (const asset of orphans.results) {
+      const listed = await env.BUCKET.list({ prefix: `users/${asset.user_id}/assets/${asset.id}/` });
+      keys.push(...listed.objects.map((o) => o.key));
+    }
+    for (let i = 0; i < keys.length; i += 500) await env.BUCKET.delete(keys.slice(i, i + 500));
   }
-  for (let i = 0; i < keys.length; i += 500) await env.BUCKET.delete(keys.slice(i, i + 500));
 
   const statements = [
     env.DB.prepare("DELETE FROM videos WHERE project_id = ?").bind(project.id),
@@ -203,6 +205,8 @@ async function startJob(
   project: ProjectRow,
   job: { kind: "generate" | "render" | "director"; stage: string; params: Record<string, unknown>; state?: JobState; charge: "video" | "none" },
 ): Promise<JobRow> {
+  // No storage, no generation: refuse before anything is created or charged.
+  bucket(env);
   const id = newId("job");
   const t = now();
   const inserted = await env.DB.prepare(
@@ -396,6 +400,7 @@ projects.post("/:id/director", async (c) => {
   }
 
   if (result.newAssets.length > 0) {
+    bucket(c.env);
     // New models are needed. Only those are generated — existing models are untouched.
     let provisioned;
     try {

@@ -33,6 +33,7 @@ app.get("/api/health", (c) =>
       clerkWebhooks: !!c.env.CLERK_WEBHOOK_SECRET,
       renderService: !!c.env.RENDER_SERVICE_TOKEN,
       mediaSigning: !!c.env.SIGNING_SECRET,
+      storage: !!c.env.BUCKET,
     },
   }),
 );

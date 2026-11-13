@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AppBindings } from "../env";
 import { assetKey } from "../pipeline/assets";
 import { claimRenderJob, completeRender, failRender, loadRenderJob, reportProgress, storeUpload } from "../pipeline/render";
-import { HttpError, timingSafeEqual } from "../util";
+import { HttpError, bucket, timingSafeEqual } from "../util";
 
 /**
  * API for the external Blender render service. Authenticated with a shared
@@ -47,7 +47,7 @@ renderService.get("/jobs/:id/files/:assetId/:file", async (c) => {
     .bind(row.project_id, c.req.param("assetId"), row.user_id)
     .first<{ id: string }>();
   if (!link) throw new HttpError(404, "internal", "This model is not part of the render.");
-  const object = await c.env.BUCKET.get(assetKey(row.user_id, link.id, file));
+  const object = await bucket(c.env).get(assetKey(row.user_id, link.id, file));
   if (!object) throw new HttpError(404, "storage_error", "The model file is missing from storage.");
   return new Response(object.body, { headers: { "content-type": "model/gltf-binary", "content-length": String(object.size) } });
 });

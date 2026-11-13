@@ -31,6 +31,8 @@ export interface Harness {
   request: (path: string, init?: { method?: string; body?: unknown; token?: string; headers?: Record<string, string>; raw?: BodyInit }) => Promise<Response>;
   json: <T = any>(path: string, init?: Parameters<Harness["request"]>[1]) => Promise<{ status: number; body: T }>;
   db: D1Database;
+  /** The test bucket (also `env.BUCKET` unless a test removes storage). */
+  bucket: R2Bucket;
   close: () => Promise<void>;
 }
 
@@ -71,9 +73,10 @@ export async function createHarness(vars: Partial<Env> = {}): Promise<Harness> {
     throw new Error(`Unexpected external request in test: ${request.method} ${request.url}`);
   });
 
+  const r2 = (await mf.getR2Bucket("BUCKET")) as unknown as R2Bucket;
   const env: Env = {
     DB: db,
-    BUCKET: (await mf.getR2Bucket("BUCKET")) as unknown as R2Bucket,
+    BUCKET: r2,
     PIPELINE: {
       async send(body: PipelineMessage, opts?: { delaySeconds?: number }) {
         sent.push({ body, delaySeconds: opts?.delaySeconds });
@@ -121,6 +124,7 @@ export async function createHarness(vars: Partial<Env> = {}): Promise<Harness> {
     sent,
     calls,
     db,
+    bucket: r2,
     on: (match, handler) => void handlers.push({ match, handler }),
     token,
     request,

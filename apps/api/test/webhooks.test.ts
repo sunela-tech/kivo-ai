@@ -83,11 +83,11 @@ describe("Clerk webhooks", () => {
 
     const token = await h.token("user_gone");
     await h.json("/api/projects", { token, body: { prompt: "something private" } });
-    await h.env.BUCKET.put("users/user_gone/videos/v.mp4", "x");
+    await h.bucket.put("users/user_gone/videos/v.mp4", "x");
     expect((await post(signed({ type: "user.deleted", data: { id: "user_gone", deleted: true } }))).status).toBe(200);
     expect(await h.db.prepare("SELECT id FROM users WHERE id = 'user_gone'").first()).toBeNull();
     expect((await h.db.prepare("SELECT COUNT(*) AS n FROM projects WHERE user_id = 'user_gone'").first<{ n: number }>())!.n).toBe(0);
-    expect(await h.env.BUCKET.head("users/user_gone/videos/v.mp4")).toBeNull();
+    expect(await h.bucket.head("users/user_gone/videos/v.mp4")).toBeNull();
   });
 
   it("refuses to run without a configured signing secret", async () => {

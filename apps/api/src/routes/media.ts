@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../env";
 import { verifySignedPath } from "../signing";
-import { HttpError } from "../util";
+import { HttpError, bucket } from "../util";
 
 /**
  * Private media delivery. The bucket has no public access; every object is
@@ -37,7 +37,7 @@ media.on(["GET", "HEAD"], "/o/:key", async (c) => {
   }
   if (!key.startsWith("users/") || key.includes("..")) throw new HttpError(400, "internal", "Malformed media link.");
 
-  const head = await c.env.BUCKET.head(key);
+  const head = await bucket(c.env).head(key);
   if (!head) throw new HttpError(404, "internal", "This file no longer exists.");
   const headers = new Headers({
     "content-type": head.httpMetadata?.contentType ?? "application/octet-stream",
@@ -58,7 +58,7 @@ media.on(["GET", "HEAD"], "/o/:key", async (c) => {
     headers.set("content-length", String(head.size));
     return new Response(null, { status: 200, headers });
   }
-  const object = await c.env.BUCKET.get(key, range ? { range } : undefined);
+  const object = await bucket(c.env).get(key, range ? { range } : undefined);
   if (!object) throw new HttpError(404, "internal", "This file no longer exists.");
   if (range) {
     headers.set("content-range", `bytes ${range.offset}-${range.offset + range.length - 1}/${head.size}`);

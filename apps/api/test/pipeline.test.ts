@@ -148,7 +148,7 @@ describe("generation pipeline", () => {
     expect(scene.assets.robot.modelUrl).toMatch(/^\/api\/media\/o\/.+[?&]s=/);
 
     // Models are stored in R2 under the owner's prefix and their real Meshy cost is recorded.
-    const stored = await h.env.BUCKET.list({ prefix: "users/user_pipe/assets/" });
+    const stored = await h.bucket.list({ prefix: "users/user_pipe/assets/" });
     const files = stored.objects.map((o) => o.key.split("/").pop()).sort();
     expect(files).toEqual(["actions.glb", "model.glb", "model.glb", "model.glb", "rigged.glb", "run.glb", "thumb.png", "thumb.png", "thumb.png", "walk.glb"]);
     const spent = await h.db.prepare("SELECT SUM(units) AS n FROM cost_events WHERE user_id = 'user_pipe' AND provider = 'meshy'").first<{ n: number }>();

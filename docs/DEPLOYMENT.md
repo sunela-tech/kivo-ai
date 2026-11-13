@@ -24,6 +24,17 @@ scripts/setup-cloudflare.sh
 
 That script creates the bucket and queues if they are missing, applies the D1 migrations, builds the web app, deploys the Worker, and uploads the secrets from `apps/api/.dev.vars`.
 
+Two situations it handles for you:
+
+- **R2 not enabled yet.** The site is deployed without file storage. Sign-in, the dashboard, plans and settings work; starting a generation or render is refused with a message saying storage is not enabled, and nothing is charged. `GET /api/health` shows `"storage": false`. Enable R2 in the dashboard and run the script again.
+- **Static-asset upload cannot authenticate.** Wrangler uploads the web app's files with a separate upload token in the `Authorization` header. Behind a proxy that injects its own `Authorization` header (some managed dev environments), that step fails with 401. Run the script with `KIVO_EMBED_WEB=1` to ship the built web app inside the Worker script instead:
+
+```bash
+KIVO_EMBED_WEB=1 scripts/setup-cloudflare.sh
+```
+
+The embedded deploy behaves the same for visitors, but every static request then invokes the Worker, so prefer the normal deploy wherever it works.
+
 To do only one of those later:
 
 ```bash
@@ -103,7 +114,7 @@ Workers claim the highest-priority queued job first (Studio > Ultra > Pro > Free
 
 ## 4. Check the deployment
 
-1. `curl https://<host>/api/health` — every integration `true`.
+1. `curl https://<host>/api/health` — every integration `true`, including `storage`.
 2. Sign up, create a video in Simple Mode, and watch the stages advance. With no render worker running, the job waits at "Preparing rendering" and fails with a refund after `RENDER_QUEUE_TIMEOUT_MINUTES`.
 3. Start a render worker; the next job reaches "Completed" with a playable, downloadable MP4.
 4. Subscribe to Pro with a Stripe test card on the Subscription page; `/api/me` then reports the Pro limits and new renders have no watermark.

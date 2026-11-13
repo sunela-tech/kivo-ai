@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
-  BUCKET: R2Bucket;
+  /** Absent when the account has not enabled R2 yet. Everything that stores or reads files checks for it. */
+  BUCKET?: R2Bucket;
   PIPELINE: Queue<PipelineMessage>;
   ASSETS?: Fetcher;
 

@@ -17,3 +17,5 @@ services/renderer/work/
 coverage/
 test-results/
 playwright-report/
+apps/api/wrangler.generated.jsonc
+apps/api/.embedded/

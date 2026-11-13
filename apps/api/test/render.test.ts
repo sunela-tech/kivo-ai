@@ -46,7 +46,7 @@ async function projectWithScene(userId: string, plan: string) {
   const projectId = created.body.project.id as string;
   const t = Date.now();
   const assetId = `ast_${userId}`;
-  await h.env.BUCKET.put(`users/${userId}/assets/${assetId}/model.glb`, "glb-bytes", { httpMetadata: { contentType: "model/gltf-binary" } });
+  await h.bucket.put(`users/${userId}/assets/${assetId}/model.glb`, "glb-bytes", { httpMetadata: { contentType: "model/gltf-binary" } });
   await h.db.batch([
     h.db.prepare("INSERT INTO assets (id, user_id, cache_key, name, kind, prompt, ai_model, spec, status, model_key, created_at, updated_at, last_used_at) VALUES (?, ?, ?, 'Hero', 'prop', 'a statue', 'meshy-6-lite', '{}', 'ready', ?, ?, ?, ?)").bind(assetId, userId, `key_${userId}`, `users/${userId}/assets/${assetId}/model.glb`, t, t, t),
     h.db.prepare("INSERT INTO project_assets (project_id, alias, asset_id) VALUES (?, 'hero', ?)").bind(projectId, assetId),
@@ -204,7 +204,7 @@ describe("render service protocol", () => {
     expect((await h.json(`/api/projects/${projectId}/videos`, { token })).body.videos).toEqual([]);
     expect((await h.json(`/api/projects/${projectId}`, { token })).body.video).toBeNull();
     expect((await h.json("/api/me", { token })).body.usage.used).toBe(0);
-    const stored = await h.env.BUCKET.list({ prefix: "users/user_badfile/videos/" });
+    const stored = await h.bucket.list({ prefix: "users/user_badfile/videos/" });
     expect(stored.objects).toEqual([]);
   });
 
@@ -274,7 +274,7 @@ describe("render service protocol", () => {
   it("refuses to render a scene whose model is not in storage", async () => {
     const { token, projectId, assetId } = await projectWithScene("user_missing_model", "pro");
     await h.json(`/api/projects/${projectId}/scene`, { method: "PUT", token, body: { spec: bigScene() } });
-    await h.env.BUCKET.delete(`users/user_missing_model/assets/${assetId}/model.glb`);
+    await h.bucket.delete(`users/user_missing_model/assets/${assetId}/model.glb`);
     const res = await h.json(`/api/projects/${projectId}/render`, { token, body: {} });
     await advanceJob(h.env, res.body.job.id);
     const job = (await h.json(`/api/jobs/${res.body.job.id}`, { token })).body.job;

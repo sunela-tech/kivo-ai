@@ -2,7 +2,7 @@ import { BUILTIN_CLIPS, type PlanLimits, type SceneAsset } from "@kivo/shared";
 import type { Env } from "../env";
 import { Meshy, MeshyHttpError, type MeshyTask, type TaskKind } from "../meshy";
 import { recordCost } from "../usage";
-import { PipelineError, fetchWithTimeout, log, now, parseJson, sha256Hex } from "../util";
+import { PipelineError, bucket, fetchWithTimeout, log, now, parseJson, sha256Hex } from "../util";
 
 /**
  * The life of one Meshy-generated model.
@@ -157,7 +157,7 @@ async function download(ctx: AssetContext, url: string, what: string): Promise<A
 
 async function store(ctx: AssetContext, key: string, data: ArrayBuffer, contentType: string): Promise<void> {
   try {
-    await ctx.env.BUCKET.put(key, data, { httpMetadata: { contentType } });
+    await bucket(ctx.env).put(key, data, { httpMetadata: { contentType } });
   } catch (error) {
     log("r2_put_failed", { key, error: String(error) });
     throw new PipelineError("storage_error", "Storing a generated model failed.", true);
