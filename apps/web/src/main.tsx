@@ -29,7 +29,7 @@ function Boot() {
 
   useEffect(() => {
     // The publishable key and the live plan table come from the server, so the web build has no baked-in configuration.
-    api<AppConfig>("/config")
+    api<AppConfig>("/config", { public: true })
       .then(setConfig)
       .catch((e: Error) => setError(e.message));
   }, []);

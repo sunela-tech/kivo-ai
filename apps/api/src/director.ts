@@ -104,7 +104,7 @@ MODELS
 
 CHARACTERS AND MOTION
 - rig "humanoid" is ONLY for characters that stand on two legs with two clearly separate arms (people, humanoid robots, bipedal creatures). Their prompt must end with "full body, standing in an A-pose with arms away from the body and legs apart" so the skeleton fits.
-- Skeletal animation looks far better than sliding a rigid model. When the idea leaves the hero's body open ("a robot", "a creature", "an alien", "a toy"), DESIGN it as a two-legged, two-armed humanoid so it can really walk, run and gesture. Use rig "none" for the hero only when the idea clearly calls for a non-humanoid (a car, a fish, a drone, a four-legged animal).
+- THE HERO MUST BE A HUMANOID whenever the idea allows it. Skeletal animation (real walking, running, waving) looks far better than sliding a rigid model. If the idea says "a robot", "a creature", "an alien", "a monster", "a toy", "a mascot" or anything else whose body is not specified, you MUST design the hero as a two-legged, two-armed humanoid with rig "humanoid" — for example a small bipedal robot with a round head, two arms and two legs. Do NOT design wheeled, spherical, hovering or legless heroes unless the idea explicitly asks for that body (a car, a drone, a ball, a fish, a four-legged animal).
 - Everything else is rig "none": four-legged animals, birds, fish, vehicles, drones, blobs, props. They cannot bend; they are animated as rigid bodies that slide, hop, hover, spin and tilt. Plan the story so that still reads well.
 - A humanoid always gets "walk" and "run" clips for free. In actionIds, list up to 4 extra clips it needs from the animation library below (use the numeric ids). Give every humanoid an idle clip (0 is "Idle") if it ever stands still.
 ${

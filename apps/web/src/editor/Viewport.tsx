@@ -327,13 +327,9 @@ function heldClip(spec: SceneSpec, objectId: string, t: number): { action: strin
 
 function Driver({ spec, onFade }: { spec: SceneSpec; onFade: (opacity: number) => void }) {
   const sampler = useMemo(() => new SceneSampler(spec), [spec]);
-  const { camera, gl } = useThree();
+  const { camera } = useThree();
   const lastFade = useRef(-1);
   const lookAt = useMemo(() => new THREE.Vector3(), []);
-
-  useEffect(() => {
-    gl.toneMappingExposure = 2 ** spec.world.exposure;
-  }, [gl, spec.world.exposure]);
 
   useFrame((_, delta) => {
     const state = useEditor.getState();
@@ -398,6 +394,54 @@ function Driver({ spec, onFade }: { spec: SceneSpec; onFade: (opacity: number) =
       lastFade.current = fade;
       onFade(fade);
     }
+  });
+  return null;
+}
+
+/** Average picture brightness to aim for, by time of day — the same targets the render service meters to. */
+function exposureTarget(ambient: number): number {
+  return ambient < 0.2 ? 0.2 : ambient < 0.7 ? 0.3 : 0.38;
+}
+const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+
+/**
+ * Auto-exposure for the preview, like the render's light meter: a tiny off-screen
+ * render is measured a few times a second and the exposure eases toward a sensible
+ * brightness for the scene's time of day. Night scenes stay moody but workable.
+ */
+function AutoExposure({ spec }: { spec: SceneSpec }) {
+  const { gl, scene, camera } = useThree();
+  const target = useMemo(() => new THREE.WebGLRenderTarget(48, 27, { type: THREE.FloatType, depthBuffer: true }), []);
+  const buffer = useMemo(() => new Float32Array(48 * 27 * 4), []);
+  const state = useRef({ last: 0, exposure: 1, goal: 1, supported: true });
+  useEffect(() => () => target.dispose(), [target]);
+
+  useFrame((_, delta) => {
+    const s = state.current;
+    const user = 2 ** spec.world.exposure;
+    if (!s.supported) {
+      gl.toneMappingExposure = user;
+      return;
+    }
+    const now = performance.now();
+    if (now - s.last > 350) {
+      s.last = now;
+      try {
+        const previous = gl.getRenderTarget();
+        gl.setRenderTarget(target);
+        gl.render(scene, camera);
+        gl.readRenderTargetPixels(target, 0, 0, 48, 27, buffer);
+        gl.setRenderTarget(previous);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i += 4) sum += Math.log(1e-4 + 0.2126 * buffer[i]! + 0.7152 * buffer[i + 1]! + 0.0722 * buffer[i + 2]!);
+        const mean = Math.exp(sum / (buffer.length / 4));
+        if (Number.isFinite(mean) && mean > 0) s.goal = Math.min(64, Math.max(0.05, srgbToLinear(exposureTarget(spec.world.ambient)) / mean));
+      } catch {
+        s.supported = false; // float render targets unavailable: fall back to the scene's own exposure
+      }
+    }
+    s.exposure += (s.goal - s.exposure) * Math.min(1, delta * 4);
+    gl.toneMappingExposure = s.exposure * user;
   });
   return null;
 }
@@ -526,6 +570,7 @@ export function Viewport() {
           <FreeControls enabled={free} />
           {free && selection && <Gizmo spec={spec} selection={selection} />}
           <Driver spec={spec} onFade={setFade} />
+          <AutoExposure spec={spec} />
         </Canvas>
         {fade > 0 && <div className="pointer-events-none absolute inset-0 bg-black" style={{ opacity: fade }} />}
         {!free && <div className="pointer-events-none absolute inset-0 rounded-sm ring-1 ring-violet-500/40" />}

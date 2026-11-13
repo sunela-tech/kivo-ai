@@ -17,12 +17,27 @@ export class ApiError extends Error {
 }
 
 let tokenGetter: (() => Promise<string | null>) | null = null;
+let waiting: (() => void)[] = [];
+
+/** Called by the signed-in shell with Clerk's getToken. Requests made before that wait for it. */
 export function setTokenGetter(fn: (() => Promise<string | null>) | null) {
   tokenGetter = fn;
+  if (fn) {
+    for (const resume of waiting) resume();
+    waiting = [];
+  }
 }
 
-export async function api<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
-  const token = tokenGetter ? await tokenGetter() : null;
+async function sessionToken(): Promise<string | null> {
+  if (!tokenGetter) {
+    // A component asked for data before the session was wired up (possible on a hard reload). Wait briefly rather than send an unauthenticated request.
+    await Promise.race([new Promise<void>((resolve) => waiting.push(resolve)), new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
+  }
+  return tokenGetter ? tokenGetter() : null;
+}
+
+export async function api<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal; public?: boolean } = {}): Promise<T> {
+  const token = init.public ? null : await sessionToken();
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {

@@ -1,5 +1,5 @@
 import { Show, useAuth } from "@clerk/react";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { AppShell } from "./components/AppShell";
 import { Loading } from "./components/ui";
@@ -24,7 +24,6 @@ function SignedIn({ config }: { config: AppConfig }) {
   // Registered during render, not in an effect: child components start fetching in their own
   // effects, which run before this component's would.
   setTokenGetter(() => getToken());
-  useEffect(() => () => setTokenGetter(null), []);
 
   return (
     <SessionProvider config={config}>

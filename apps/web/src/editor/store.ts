@@ -85,7 +85,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       const [detail, scene] = await Promise.all([api<{ project: Project }>(`/projects/${projectId}`), api<SceneResponse>(`/projects/${projectId}/scene`)]);
       if (get().projectId !== projectId) return;
-      set({ project: detail.project, spec: scene.spec, assets: scene.assets, version: scene.version, loading: false });
+      set({ project: detail.project, spec: scene.spec, assets: scene.assets, version: scene.version, loading: false, ...(scene.spec ? { freeView: openingView(scene.spec) } : {}) });
     } catch (e) {
       set({ loading: false, loadError: (e as Error).message });
     }
@@ -174,6 +174,22 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ projectId: null, project: null, spec: null, assets: {}, selection: null, past: [], future: [], dirty: false, playing: false });
   },
 }));
+
+/** Where the free camera starts: the first shot's framing, pulled back and raised so the staging is visible. */
+function openingView(spec: SceneSpec): EditorState["freeView"] {
+  const sampler = new SceneSampler(spec);
+  const shot = sampler.shotAt(0);
+  if (!shot) return { position: [8, 5, -10], target: [0, 1, 0], fov: 45 };
+  const cam = sampler.sampleCamera(shot.cameraId, Math.min(spec.output.duration, shot.start + 0.5));
+  const d: Vec3 = [cam.position[0] - cam.target[0], cam.position[1] - cam.target[1], cam.position[2] - cam.target[2]];
+  const length = Math.hypot(d[0], d[1], d[2]) || 1;
+  const back = Math.min(40, Math.max(4, length * 1.8)) / length;
+  return {
+    position: [cam.target[0] + d[0] * back, Math.max(1.5, cam.target[1] + d[1] * back + length * 0.6), cam.target[2] + d[2] * back],
+    target: cam.target,
+    fov: 45,
+  };
+}
 
 // ───────────── pure scene edits ─────────────
 
