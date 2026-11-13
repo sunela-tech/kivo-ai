@@ -46,7 +46,6 @@ CREATE TABLE projects (
   latest_video_id TEXT,
   thumbnail_key TEXT,
   render_credits INTEGER NOT NULL DEFAULT 0,   -- renders already paid for by a scene-only generation
-  share_token TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

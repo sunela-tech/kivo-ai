@@ -116,6 +116,8 @@ export function EditorPage() {
   const selection = useEditor((s) => s.selection);
   const [left, setLeft] = useState<LeftTab>("scene");
   const [right, setRight] = useState<RightTab>("inspect");
+  // On small screens the side panels are drawers opened from the top bar.
+  const [drawer, setDrawer] = useState<"left" | "right" | null>(null);
 
   useEffect(() => {
     if (projectId) void useEditor.getState().load(projectId);
@@ -198,8 +200,10 @@ export function EditorPage() {
           <ArrowLeft className="size-4" />
         </Link>
         <Logo size={22} wordmark={false} />
-        <span className="max-w-[26ch] truncate text-sm font-semibold">{spec.title}</span>
-        <SaveState />
+        <span className="hidden max-w-[26ch] truncate text-sm font-semibold sm:block">{spec.title}</span>
+        <span className="hidden sm:block">
+          <SaveState />
+        </span>
         <div className="flex-1" />
         <Segmented
           size="sm"
@@ -218,21 +222,35 @@ export function EditorPage() {
             { value: "advanced", label: "Advanced" },
           ]}
         />
-        <div className="flex-1" />
+        <div className="hidden flex-1 sm:block" />
         <IconButton label="Undo (Ctrl+Z)" onClick={() => useEditor.getState().undo()} disabled={!canUndo}>
           <Undo2 className="size-4" />
         </IconButton>
         <IconButton label="Redo (Ctrl+Shift+Z)" onClick={() => useEditor.getState().redo()} disabled={!canRedo}>
           <Redo2 className="size-4" />
         </IconButton>
-        <Button size="sm" variant="primary" onClick={() => setRight("render")}>
+        <button onClick={() => setDrawer(drawer === "left" ? null : "left")} aria-expanded={drawer === "left"} className="rounded-lg px-2 py-1.5 text-xs font-medium text-ink-2 hover:bg-panel-2 md:hidden">
+          Scene
+        </button>
+        <button onClick={() => setDrawer(drawer === "right" ? null : "right")} aria-expanded={drawer === "right"} className="rounded-lg px-2 py-1.5 text-xs font-medium text-ink-2 hover:bg-panel-2 lg:hidden">
+          Edit
+        </button>
+        <Button
+          size="sm"
+          variant="primary"
+          onClick={() => {
+            setRight("render");
+            setDrawer("right");
+          }}
+        >
           Render
         </Button>
       </header>
 
       <div className="flex min-h-0 flex-1">
+        {drawer && <div className="fixed inset-0 top-12 z-30 bg-night-950/60 lg:hidden" onClick={() => setDrawer(null)} />}
         {/* Left */}
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-panel md:flex">
+        <aside className={cx("w-64 shrink-0 flex-col border-r border-line bg-panel md:static md:flex", drawer === "left" ? "fixed top-12 bottom-0 left-0 z-40 flex w-72 max-w-[85vw] shadow-2xl" : "hidden")}>
           <Tabs
             value={left}
             onChange={setLeft}
@@ -290,7 +308,7 @@ export function EditorPage() {
         </div>
 
         {/* Right */}
-        <aside className="hidden w-72 shrink-0 flex-col border-l border-line bg-panel lg:flex xl:w-80">
+        <aside className={cx("w-72 shrink-0 flex-col border-l border-line bg-panel lg:static lg:flex xl:w-80", drawer === "right" ? "fixed top-12 right-0 bottom-0 z-40 flex w-80 max-w-[90vw] shadow-2xl" : "hidden")}>
           <Tabs
             value={right}
             onChange={setRight}

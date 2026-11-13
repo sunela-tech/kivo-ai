@@ -1,5 +1,5 @@
 import { Loader2, X } from "lucide-react";
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -184,16 +184,18 @@ export function Loading({ label = "Loading" }: { label?: string }) {
 }
 
 export function Logo({ size = 28, wordmark = true }: { size?: number; wordmark?: boolean }) {
+  // Each instance gets its own gradient id: a shared id breaks when the first copy on the page is hidden.
+  const id = useId();
   return (
     <span className="inline-flex items-center gap-2.5 select-none">
       <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden>
         <defs>
-          <linearGradient id="kivo-g" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor="#a78bfa" />
             <stop offset="1" stopColor="#6d5df6" />
           </linearGradient>
         </defs>
-        <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#kivo-g)" />
+        <rect x="4" y="4" width="56" height="56" rx="16" fill={`url(#${id})`} />
         <path d="M26 20.5v23a2 2 0 0 0 3 1.7l19-11.5a2 2 0 0 0 0-3.4L29 18.8a2 2 0 0 0-3 1.7z" fill="#fff" />
       </svg>
       {wordmark && <span className="text-[19px] font-semibold tracking-tight">Kivo</span>}
