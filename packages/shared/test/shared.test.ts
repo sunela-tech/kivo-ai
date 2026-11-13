@@ -12,6 +12,7 @@ import {
   applyDirectorOps,
   clampRenderToPlan,
   dimensionsFor,
+  matchClipsToMotion,
   ease,
   normalizeScene,
   planToAssets,
@@ -271,6 +272,57 @@ describe("normalizeScene", () => {
     expect(Math.hypot(k0!.position[0]! + 12, k0!.position[2]! - 10)).toBeGreaterThan(10);
     expect(k1!.position[1]).toBeGreaterThanOrEqual(0.15);
     expect(warnings.some((w) => w.includes("camera keyframe"))).toBe(true);
+  });
+});
+
+describe("matching clips to motion", () => {
+  const moving = (seconds: number, metres: number, action = "walk") => {
+    const scene = demoScene();
+    scene.assets[0]!.size = { meters: 1.7, axis: "height" };
+    scene.tracks = [
+      { id: "hero_move", type: "transform", objectId: "hero", smooth: false, orientToPath: true, keyframes: [{ t: 0, position: [0, 0, 0], easing: "linear" }, { t: seconds, position: [0, 0, metres], easing: "linear" }] },
+      { id: "hero_action", type: "action", objectId: "hero", clips: [{ start: 0, end: seconds, action, speed: 1, loop: true }] },
+    ];
+    return scene;
+  };
+  const clip = (scene: ReturnType<typeof demoScene>) => {
+    const track = scene.tracks.find((t) => t.type === "action")!;
+    return track.type === "action" ? track.clips[0]! : null;
+  };
+
+  it("keeps a natural walk as it is", () => {
+    const scene = moving(4, 5.4); // 1.35 m/s for a 1.7 m character
+    expect(matchClipsToMotion(scene, { robot: ["walk", "run", "idle"] })).toEqual([]);
+    expect(clip(scene)).toMatchObject({ action: "walk", speed: 0.99 });
+  });
+
+  it("turns an impossibly fast walk into a run and says so", () => {
+    const scene = moving(2, 8); // 4 m/s
+    const notes = matchClipsToMotion(scene, { robot: ["walk", "run", "idle"] });
+    expect(clip(scene)).toMatchObject({ action: "run", speed: 0.98 });
+    expect(notes[0]).toMatch(/4\.0 m\/s.*became run/);
+  });
+
+  it("speeds up or slows down the stride when there is no better gait", () => {
+    const fast = moving(2, 8);
+    matchClipsToMotion(fast, { robot: ["walk"] });
+    expect(clip(fast)).toMatchObject({ action: "walk", speed: 2.5 });
+    const slow = moving(8, 4, "run"); // 0.5 m/s while "running"
+    matchClipsToMotion(slow, { robot: ["walk", "run"] });
+    expect(clip(slow)).toMatchObject({ action: "walk", speed: 0.5 });
+  });
+
+  it("replaces walking on the spot with an idle clip", () => {
+    const scene = moving(3, 0);
+    const notes = matchClipsToMotion(scene, { robot: ["walk", "run", "idle"] });
+    expect(clip(scene)).toMatchObject({ action: "idle", speed: 1 });
+    expect(notes[0]).toMatch(/stands still/);
+  });
+
+  it("leaves gestures and unrelated clips alone", () => {
+    const scene = moving(2, 8, "big_wave_hello");
+    expect(matchClipsToMotion(scene, { robot: ["walk", "run", "big_wave_hello"] })).toEqual([]);
+    expect(clip(scene)).toMatchObject({ action: "big_wave_hello", speed: 1 });
   });
 });
 

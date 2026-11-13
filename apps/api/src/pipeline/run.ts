@@ -5,6 +5,7 @@ import {
   assembleScene,
   cinematographyToScene,
   clampRenderToPlan,
+  matchClipsToMotion,
   normalizeScene,
   planToAssets,
   toId,
@@ -328,10 +329,12 @@ async function adjustCamerasStage(ctx: Ctx): Promise<Outcome> {
     throw error;
   }
   if (normalized.spec.objects.length === 0) throw new PipelineError("gemini_invalid_output", "The directed scene had no valid objects.", true);
+  // Make stride agree with travel speed (walk ↔ run, playback speed, idle when standing).
+  const gaitNotes = matchClipsToMotion(normalized.spec, available.clips);
 
   ctx.state.sceneId = await saveScene(ctx.env, ctx.project.id, ctx.job.user_id, normalized.spec, "gemini", "Generated from prompt");
   await saveState(ctx);
-  await addWarnings(ctx.env, ctx.job, [...normalized.warnings, ...rigWarnings(assets, available.rows)]);
+  await addWarnings(ctx.env, ctx.job, [...normalized.warnings, ...gaitNotes, ...rigWarnings(assets, available.rows)]);
 
   if (!ctx.params.render) {
     // The reserved video stays attached to the project: its first render is already paid for.

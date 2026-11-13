@@ -1,7 +1,6 @@
-import { SignIn, SignUp } from "@clerk/react";
+import { SignIn } from "@clerk/react";
 import { Box, Camera, Clapperboard, Sparkles, Wand2 } from "lucide-react";
-import { useState } from "react";
-import { Logo, cx } from "../components/ui";
+import { Logo } from "../components/ui";
 import type { AppConfig } from "../lib/api";
 
 const STEPS = [
@@ -12,7 +11,6 @@ const STEPS = [
 ];
 
 export function LandingPage({ config }: { config: AppConfig }) {
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-up");
   const free = config.plans.find((p) => p.id === "free");
   return (
     <div className="mx-auto grid min-h-dvh max-w-6xl items-center gap-12 px-6 py-12 lg:grid-cols-[1.1fr_0.9fr]">
@@ -49,14 +47,8 @@ export function LandingPage({ config }: { config: AppConfig }) {
       </div>
 
       <div className="flex flex-col items-center">
-        <div className="mb-4 inline-flex rounded-xl border border-line bg-night-850 p-1 text-sm">
-          {(["sign-up", "sign-in"] as const).map((m) => (
-            <button key={m} onClick={() => setMode(m)} className={cx("rounded-lg px-4 py-1.5 font-medium transition-colors", mode === m ? "bg-violet-600 text-white" : "text-ink-3 hover:text-ink")}>
-              {m === "sign-up" ? "Create account" : "Sign in"}
-            </button>
-          ))}
-        </div>
-        {mode === "sign-up" ? <SignUp routing="hash" signInUrl="#" /> : <SignIn routing="hash" signUpUrl="#" />}
+        {/* One flow for both: an unknown email continues straight into sign-up. */}
+        <SignIn routing="hash" withSignUp />
       </div>
     </div>
   );

@@ -44,7 +44,7 @@ def encode_mp4(frames_dir: str, out_path: str, *, fps: int, width: int, height: 
         if not os.path.isfile(WATERMARK):
             # Never deliver an unwatermarked video on a plan that requires one.
             raise EncodeError("watermark asset is missing on the render worker")
-        mark_w = max(64, int(round(width * 0.16 / 2)) * 2)
+        mark_w = max(64, int(round(width * 0.13 / 2)) * 2)
         margin = max(8, int(round(height * 0.035)))
         cmd += ["-i", WATERMARK, "-filter_complex",
                 f"[1:v]scale={mark_w}:-1:flags=lanczos[wm];[0:v][wm]overlay=W-w-{margin}:H-h-{margin}:format=auto,{base},format=yuv420p[v]",

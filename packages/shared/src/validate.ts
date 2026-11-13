@@ -409,6 +409,63 @@ export function adjustCameras(spec: SceneSpec): number {
   return moved;
 }
 
+/**
+ * Match locomotion clips to how fast a character actually travels.
+ *
+ * A director can ask a character to cross 8 m in 2 s while playing a strolling
+ * walk cycle, which makes its feet skate. For each walk/run clip this measures
+ * the real ground speed over the clip, switches walk↔run when the other gait
+ * fits better, switches to an idle clip when the character is not moving at
+ * all, and sets the playback speed so stride and travel agree. Returns notes
+ * describing what it changed. Applied to AI-directed scenes, never to a
+ * user's manual edits.
+ */
+export function matchClipsToMotion(spec: SceneSpec, availableClips: Record<string, string[]> = {}): string[] {
+  const notes: string[] = [];
+  const pathOnly = new SceneSampler({ ...spec, tracks: spec.tracks.filter((t) => t.type !== "procedural") });
+  const assetById = new Map(spec.assets.map((a) => [a.id, a]));
+  const objectById = new Map(spec.objects.map((o) => [o.id, o]));
+  for (const track of spec.tracks) {
+    if (track.type !== "action") continue;
+    const obj = objectById.get(track.objectId);
+    const asset = obj && assetById.get(obj.assetId);
+    if (!obj || !asset) continue;
+    const have = new Set(availableClips[asset.id] ?? [...BUILTIN_CLIPS, ...asset.actions.map((a) => a.name)]);
+    const height = (asset.size.axis === "height" ? asset.size.meters : 1.7) * obj.scale;
+    // Typical ground speed of Meshy's walk and run cycles, per metre of character height.
+    const nominal = { walk: 0.8 * height, run: 2.4 * height };
+    const idle = [...have].find((c) => c === "idle" || c.startsWith("idle"));
+    for (const clip of track.clips) {
+      if (clip.action !== "walk" && clip.action !== "run") continue;
+      const length = clip.end - clip.start;
+      if (length <= 0.05) continue;
+      const steps = Math.max(2, Math.ceil(length * 12));
+      let distance = 0;
+      let previous = pathOnly.sampleObject(obj.id, clip.start).position;
+      for (let i = 1; i <= steps; i++) {
+        const p = pathOnly.sampleObject(obj.id, clip.start + (length * i) / steps).position;
+        distance += Math.hypot(p[0] - previous[0], p[2] - previous[2]);
+        previous = p;
+      }
+      const speed = distance / length;
+      if (speed < 0.05 * height) {
+        if (idle) {
+          notes.push(`"${obj.name}" stands still from ${clip.start}s to ${clip.end}s, so its ${clip.action} clip became "${idle}".`);
+          clip.action = idle;
+          clip.speed = 1;
+        }
+        continue;
+      }
+      const before = clip.action;
+      if (clip.action === "walk" && speed > 1.9 * nominal.walk && have.has("run")) clip.action = "run";
+      else if (clip.action === "run" && speed < 0.55 * nominal.run && have.has("walk")) clip.action = "walk";
+      clip.speed = round(clampNum(speed / nominal[clip.action as "walk" | "run"], 0.5, 2.5), 2);
+      if (before !== clip.action) notes.push(`"${obj.name}" moves at ${speed.toFixed(1)} m/s, so its ${before} clip became ${clip.action}.`);
+    }
+  }
+  return notes;
+}
+
 /** zod helper: readable issue list. */
 export function zodIssues(error: z.ZodError): string[] {
   return error.issues.slice(0, 20).map((i) => `${i.path.join(".") || "value"}: ${i.message}`);
