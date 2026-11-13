@@ -16,10 +16,12 @@ import {
   ease,
   normalizeScene,
   planToAssets,
+  reaimEmptyShots,
   resolvePlans,
   toId,
   usagePeriod,
   type DirectorOperation,
+  type SceneSpec,
 } from "../src/index";
 import { demoScene } from "./helpers";
 
@@ -272,6 +274,135 @@ describe("normalizeScene", () => {
     expect(Math.hypot(k0!.position[0]! + 12, k0!.position[2]! - 10)).toBeGreaterThan(10);
     expect(k1!.position[1]).toBeGreaterThanOrEqual(0.15);
     expect(warnings.some((w) => w.includes("camera keyframe"))).toBe(true);
+  });
+});
+
+describe("every shot shows something", () => {
+  /** How far off the camera's centre line an object's middle is at time t, as a fraction of half the vertical field of view. */
+  function offCentre(spec: SceneSpec, cameraId: string, objectId: string, height: number, t: number): number {
+    const sampler = new SceneSampler(spec);
+    const cam = sampler.sampleCamera(cameraId, t);
+    const o = sampler.sampleObject(objectId, t).position;
+    const f = [cam.target[0] - cam.position[0], cam.target[1] - cam.position[1], cam.target[2] - cam.position[2]];
+    const d = [o[0] - cam.position[0], o[1] + height / 2 - cam.position[1], o[2] - cam.position[2]];
+    const cos = (f[0]! * d[0]! + f[1]! * d[1]! + f[2]! * d[2]!) / (Math.hypot(...f) * Math.hypot(...d));
+    return (Math.acos(Math.min(1, cos)) * 180) / Math.PI / (cam.fov / 2);
+  }
+
+  /** The scene a live run produced: the hero 40 m up beside a tower, and a look_at camera whose target was written in world coordinates. */
+  function rooftopScene(): SceneSpec {
+    const scene = demoScene();
+    scene.output.duration = 5;
+    scene.objects = [
+      { id: "floor", assetId: "ground", name: "Floor", position: [0, 0, 0], rotation: [0, 0, 0], scale: 1, visible: true },
+      { id: "tower_a", assetId: "tower", name: "Tower", position: [0, 0, 0], rotation: [0, 0, 0], scale: 2, visible: true },
+      { id: "hero", assetId: "robot", name: "Robot", position: [0, 40, 10], rotation: [0, 180, 0], scale: 1, visible: true },
+      { id: "scout", assetId: "drone", name: "Scout", position: [20, 50, -10], rotation: [0, 0, 0], scale: 1, visible: true },
+    ];
+    scene.lights = [
+      { id: "moon", name: "Moon", type: "sun", color: "#aabbff", intensity: 0.3, position: [50, 60, -50], target: [0, 0, 0], spotAngle: 45, castShadow: true },
+      { id: "neon", name: "Neon", type: "point", color: "#00ffff", intensity: 1500, position: [-5, 42, 12], target: [0, 40, 10], spotAngle: 45, castShadow: false },
+      { id: "street", name: "Street", type: "point", color: "#ff00ff", intensity: 2500, position: [0, 5, -20], target: [0, 0, 0], spotAngle: 45, castShadow: false },
+    ];
+    scene.cameras = [
+      {
+        id: "close",
+        name: "Close-up",
+        attach: { mode: "look_at", objectId: "hero" },
+        smooth: true,
+        keyframes: [
+          { t: 0, position: [1.3, 40.5, 20.9], target: [0, 40.6, 0], fov: 32, easing: "ease_in_out" },
+          { t: 5, position: [0, 40.3, 20.9], target: [0, 40.6, 0], fov: 25, easing: "ease_in_out" },
+        ],
+      },
+    ];
+    scene.shots = [{ id: "shot_1", name: "Greeting", cameraId: "close", start: 0, end: 5, transition: "fade", transitionDuration: 0.5 }];
+    scene.tracks = [
+      { id: "hero_move", type: "transform", objectId: "hero", smooth: false, orientToPath: false, keyframes: [{ t: 0, position: [0, 40, 10], easing: "hold" }, { t: 5, position: [0, 40, 10], easing: "linear" }] },
+      { id: "scout_move", type: "transform", objectId: "scout", smooth: true, orientToPath: true, keyframes: [{ t: 0, position: [20, 50, -10], easing: "linear" }, { t: 5, position: [-20, 55, 10], easing: "linear" }] },
+    ];
+    return scene;
+  }
+
+  it("repairs the scene that produced an empty video: grounds the hero and aims the camera at it", () => {
+    const raw = rooftopScene();
+    // As written, the camera films the sky 40 m above the hero.
+    expect(offCentre(raw, "close", "hero", 1.2, 2.5)).toBeGreaterThan(3);
+
+    const { spec, warnings } = normalizeScene(raw);
+    const sampler = new SceneSampler(spec);
+    for (const t of [0, 2.5, 5]) {
+      expect(sampler.sampleObject("hero", t).position[1]).toBe(0);
+      expect(offCentre(spec, "close", "hero", 1.2, t)).toBeLessThan(0.5);
+    }
+    // The camera and the light that were set up around the hero came down with it; the rest stayed.
+    expect(spec.cameras[0]!.keyframes.map((k) => k.position[1])).toEqual([0.5, 0.3]);
+    expect(spec.cameras[0]!.keyframes.every((k) => k.target[0] === 0 && k.target[2] === 0 && k.target[1]! > 0.3 && k.target[1]! < 1.2)).toBe(true);
+    expect(spec.lights.find((l) => l.id === "neon")!.position[1]).toBe(2);
+    expect(spec.lights.find((l) => l.id === "street")!.position[1]).toBe(5);
+    expect(spec.lights.find((l) => l.id === "moon")!.position[1]).toBe(60);
+    expect(sampler.sampleObject("scout", 0).position[1]).toBe(50); // things that fly keep flying
+    expect(warnings.join(" ")).toMatch(/"Robot" was placed 40 m above the ground/);
+    expect(warnings.join(" ")).toMatch(/Camera "close" was not aimed at "Robot"/);
+    expect(reaimEmptyShots(spec)).toBe(0);
+  });
+
+  it("re-aims a camera that films only empty sky", () => {
+    const scene = demoScene();
+    scene.cameras[0]!.keyframes = [{ t: 0, position: [8, 3, -12], target: [8, 60, -40], fov: 45, easing: "linear" }];
+    const { spec, warnings } = normalizeScene(scene);
+    const wide = spec.cameras.find((c) => c.id === "wide")!;
+    expect(wide.attach).toEqual({ mode: "look_at", objectId: "hero" });
+    expect(wide.keyframes[0]!.position).toEqual([8, 3, -12]); // a sensible position is kept; only the aim changes
+    for (const t of [0.05, 2, 3.95]) expect(offCentre(spec, "wide", "hero", 1.2, t)).toBeLessThan(0.5);
+    expect(warnings.join(" ")).toMatch(/Camera "Wide" showed no models during "Establish"; it was re-aimed at "Hero"/);
+    // The other cameras were fine and are untouched.
+    expect(spec.cameras.find((c) => c.id === "chase")).toEqual(normalizeScene(demoScene()).spec.cameras.find((c) => c.id === "chase"));
+  });
+
+  it("brings in a camera that is too far away to show anything", () => {
+    const scene = demoScene();
+    scene.cameras[0]!.keyframes = [{ t: 0, position: [0, 400, -900], target: [0, 900, -2000], fov: 30, easing: "linear" }];
+    const { spec } = normalizeScene(scene);
+    const key = spec.cameras.find((c) => c.id === "wide")!.keyframes[0]!;
+    const hero = new SceneSampler(spec).sampleObject("hero", 0).position;
+    const distance = Math.hypot(key.position[0]! - hero[0], key.position[1]! - hero[1], key.position[2]! - hero[2]);
+    expect(distance).toBeGreaterThan(1.5);
+    expect(distance).toBeLessThan(12);
+    expect(key.position[1]).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it("converts a follow camera written in world coordinates", () => {
+    const scene = demoScene();
+    scene.objects[0]!.position = [60, 0, 80];
+    scene.tracks = scene.tracks.filter((t) => t.type !== "transform" || t.objectId !== "hero");
+    const chase = scene.cameras.find((c) => c.id === "chase")!;
+    chase.keyframes = [{ t: 4, position: [61, 1.2, 76], target: [60, 0.8, 81], fov: 38, easing: "linear" }];
+    const { spec, warnings } = normalizeScene(scene);
+    const key = spec.cameras.find((c) => c.id === "chase")!.keyframes[0]!;
+    expect(key.position).toEqual([1, 1.2, -4]);
+    expect(key.target).toEqual([0, 0.8, 1]);
+    expect(warnings.join(" ")).toMatch(/Camera "chase" was not aimed at "Hero"/);
+  });
+
+  it("leaves good scenes alone: jumps, flying props and deliberate framing are not 'repaired'", () => {
+    const scene = demoScene();
+    const move = scene.tracks.find((t) => t.type === "transform" && t.objectId === "hero")!;
+    if (move.type === "transform") move.keyframes[1]!.position = [1.5, 1.8, 0]; // a jump: the path still touches the ground
+    const { spec, warnings } = normalizeScene(scene);
+    expect(warnings).toEqual([]);
+    expect(new SceneSampler(spec).sampleObject("hero", 3).position[1]).toBeCloseTo(1.8, 3);
+    expect(new SceneSampler(spec).sampleObject("scout", 0).position[1]).toBeGreaterThan(2);
+    expect(spec.cameras).toEqual(normalizeScene(demoScene()).spec.cameras);
+    expect(reaimEmptyShots(spec)).toBe(0);
+  });
+
+  it("lifts a character that was sunk into the ground", () => {
+    const scene = demoScene();
+    scene.tracks = scene.tracks.filter((t) => t.objectId !== "hero" || t.type !== "transform");
+    scene.objects[0]!.position = [0, -3, -4];
+    const { spec } = normalizeScene(scene);
+    expect(spec.objects.find((o) => o.id === "hero")!.position).toEqual([0, 0, -4]);
   });
 });
 

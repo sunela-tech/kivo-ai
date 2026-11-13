@@ -178,6 +178,8 @@ ${WORLD_RULES}
 PLACEMENT ("objects")
 - Create one object per placement. Use every model at least once. Place the terrain model once at [0, 0, 0] with rotationY 0 and scale 1.
 - Models stand on the ground automatically: y = 0 puts their base on the ground. Use y > 0 only for things that fly or float.
+- Characters ALWAYS stand on the ground: every character position has y = 0. Never put a character on a roof, balcony, bridge, platform or vehicle — models are solid shapes with no walkable surfaces, so it would float in mid-air. A scene "on a rooftop" is staged on the ground with the skyline around it.
+- Never place the hero inside or touching a building: keep at least the building's width between them.
 - Repeat set pieces (buildings, trees, rocks) several times with different positions, headings and scales (0.7–1.4) to build the place. Keep them out of the hero's path and leave the area between the hero and likely camera positions clear.
 - Give objects short unique ids like "hero", "tower_1", "tree_3".
 
@@ -250,7 +252,7 @@ ${WORLD_RULES}
 CAMERAS
 - Use 1–4 cameras. Each camera has keyframes with a position, a target point it looks at, and a vertical fov in degrees (24–35 telephoto/close-up, 40–50 normal, 60–75 wide).
 - attachMode "world": position and target are absolute. Good for establishing shots, slow push-ins and static angles.
-- attachMode "look_at" with attachObjectId: the camera stays where you put it and keeps aiming at that object. target is an OFFSET from the object's position — use [0, h, 0] where h is about 60% of the object's height.
+- attachMode "look_at" with attachObjectId: the camera stays where you put it and keeps aiming at that object. target is an OFFSET from the object's position, NOT a world coordinate — use [0, h, 0] where h is about 60% of the object's height (for a 1 m robot standing anywhere in the world: [0, 0.6, 0]).
 - attachMode "follow" with attachObjectId: the camera travels with the object. position and target are BOTH offsets from the object's position. Example chase shot for a 1.2 m robot walking toward +Z: position [1.2, 1.0, -3], target [0, 0.7, 1].
   To orbit an object, use follow with 5 or more keyframes placed around a circle (smooth true, easing "linear").
 - Framing distance: to fit a subject of height H with a little headroom at fov F, stand about H × 1.4 / (2 × tan(F/2)) away. For H = 1.7 and F = 40 that is about 3.3 m.

@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { SceneSampler } from "./interp";
+import { SceneSampler, type CameraSample } from "./interp";
 import {
   BUILTIN_CLIPS,
   SceneSpecSchema,
   cloneJson,
   type Camera,
   type SceneAsset,
+  type SceneObject,
   type SceneSpec,
   type Shot,
   type Track,
@@ -276,14 +277,212 @@ export function normalizeScene(input: unknown, options: NormalizeOptions = {}): 
     );
   }
 
+  // ---- attached cameras aim with offsets; characters stand on the ground (both need the final tracks) ----
+  fixAttachedCameraOffsets(spec, warnings);
+  groundCharacters(spec, warnings);
+
   // ---- shots ----
   spec.shots = normalizeShots(spec.shots, spec.cameras, D, warnings);
 
   // ---- camera clearance (needs the final tracks) ----
-  const moved = adjustCameras(spec);
+  let moved = adjustCameras(spec);
+
+  // ---- no shot may show an empty frame ----
+  if (reaimEmptyShots(spec, warnings) > 0) moved += adjustCameras(spec);
   if (moved > 0) warnings.push(`Moved ${moved} camera keyframe${moved === 1 ? "" : "s"} that were inside an object or below the ground.`);
 
   return { spec, warnings };
+}
+
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const len = (a: Vec3): number => Math.hypot(a[0], a[1], a[2]);
+const round3 = (a: Vec3): Vec3 => [round(a[0]), round(a[1]), round(a[2])];
+
+/**
+ * Cameras attached to an object give their target (and, for "follow", their position) as an
+ * offset from that object. A model sometimes writes world coordinates there instead, which
+ * points the camera far away from its subject. Offsets that cannot be offsets are repaired.
+ */
+function fixAttachedCameraOffsets(spec: SceneSpec, warnings: string[]): void {
+  const sampler = new SceneSampler(cloneJson(spec) as SceneSpec);
+  const assetById = new Map(spec.assets.map((a) => [a.id, a]));
+  const objectById = new Map(spec.objects.map((o) => [o.id, o]));
+  for (const cam of spec.cameras) {
+    if (cam.attach.mode === "world" || !cam.attach.objectId) continue;
+    const obj = objectById.get(cam.attach.objectId);
+    const asset = obj && assetById.get(obj.assetId);
+    if (!obj || !asset) continue;
+    let fixed = 0;
+    for (const key of cam.keyframes) {
+      const s = sampler.sampleObject(obj.id, key.t);
+      const h = Math.max(assetHeight(asset, s.scale), 0.2);
+      const reach = assetRadius(asset, s.scale) + Math.max(1, h);
+      const plausible = (v: Vec3) => Math.hypot(v[0], v[2]) <= reach && v[1] >= -0.5 && v[1] <= h * 1.5 + 0.5;
+      if (!plausible(key.target as Vec3)) {
+        const asOffset = sub(key.target as Vec3, s.position);
+        key.target = plausible(asOffset) ? round3(asOffset) : [0, round(h * 0.6), 0];
+        fixed++;
+      }
+      if (cam.attach.mode === "follow") {
+        const asOffset = sub(key.position as Vec3, s.position);
+        const far = len(key.position as Vec3);
+        if (far > Math.max(12, 12 * h) && len(asOffset) < far * 0.5 && len(asOffset) > 0.05) {
+          key.position = round3(asOffset);
+          fixed++;
+        }
+      }
+    }
+    if (fixed > 0) warnings.push(`Camera "${cam.id}" was not aimed at "${obj.name || obj.id}" (its target was not relative to it); it was re-aimed.`);
+  }
+}
+
+/**
+ * Characters stand on the ground: models are solid shapes with no walkable roofs or ledges,
+ * so a character placed in the air would simply float. One whose whole path is off the ground
+ * is moved down to it, together with the cameras and lights that were set up around it.
+ */
+function groundCharacters(spec: SceneSpec, warnings: string[]): void {
+  const before = new SceneSampler(cloneJson(spec) as SceneSpec);
+  const assetById = new Map(spec.assets.map((a) => [a.id, a]));
+  for (const obj of spec.objects) {
+    const asset = assetById.get(obj.assetId);
+    if (!asset || asset.kind !== "character" || asset.rig !== "humanoid") continue;
+    const track = spec.tracks.find((t) => t.type === "transform" && t.objectId === obj.id);
+    const keyed = track && track.type === "transform" ? track.keyframes.filter((k) => k.position) : [];
+    const lift = keyed.length > 0 ? Math.min(...keyed.map((k) => k.position![1]!)) : obj.position[1]!;
+    if (Math.abs(lift) <= 0.05) continue;
+
+    obj.position = [obj.position[0]!, round(Math.max(0, obj.position[1]! - lift)), obj.position[2]!];
+    for (const k of keyed) k.position = [k.position![0]!, round(k.position![1]! - lift), k.position![2]!];
+    if (lift < 0) continue; // it was sunk into the ground: lifting it out is all that is needed
+
+    const h = assetHeight(asset, obj.scale);
+    const r = assetRadius(asset, obj.scale);
+    const wasNear = (p: Vec3, t: number, reach: number) => len(sub(p, before.sampleObject(obj.id, t).position)) <= reach;
+    const lower = (v: number[], floor: number): Vec3 => [v[0]!, round(Math.max(floor, v[1]! - lift)), v[2]!];
+    for (const cam of spec.cameras) {
+      const mine = cam.attach.objectId === obj.id;
+      if (mine && cam.attach.mode === "follow") continue; // its offsets travel with the character
+      for (const key of cam.keyframes) {
+        if (mine && cam.attach.mode === "look_at") {
+          if (key.position[1]! >= lift * 0.5) key.position = lower(key.position, 0.3);
+        } else if (cam.attach.mode === "world" && wasNear(key.target as Vec3, key.t, r + h + 3)) {
+          key.target = lower(key.target, 0);
+          if (key.position[1]! >= lift * 0.5) key.position = lower(key.position, 0.3);
+        }
+      }
+    }
+    for (const light of spec.lights) {
+      if (light.type === "sun" || light.position[1]! < lift * 0.5 || !wasNear(light.position as Vec3, 0, Math.max(15, 8 * h))) continue;
+      light.position = lower(light.position, 0.2);
+      if (light.target[1]! >= lift * 0.5) light.target = lower(light.target, 0);
+    }
+    warnings.push(`"${obj.name || obj.id}" was placed ${round(lift, 1)} m above the ground with nothing to stand on; it was moved down to the ground.`);
+  }
+}
+
+/** Is any part of an upright object inside the camera's view, and large enough to read? */
+function inFrame(cam: CameraSample, base: Vec3, height: number, radius: number, aspect: number): boolean {
+  const forward = sub(cam.target, cam.position);
+  const fl = len(forward);
+  if (fl < 1e-6) return false;
+  const f: Vec3 = [forward[0] / fl, forward[1] / fl, forward[2] / fl];
+  let right = cross(f, [0, 1, 0]);
+  if (len(right) < 1e-6) right = [1, 0, 0];
+  const rl = len(right);
+  right = [right[0] / rl, right[1] / rl, right[2] / rl];
+  const up = cross(right, f);
+  const tanV = Math.tan((cam.fov * Math.PI) / 360);
+  const tanH = tanV * aspect;
+  const margin = Math.min(radius, Math.max(height, radius)) * 0.5;
+  const size = Math.max(height, radius * 2);
+  // Sample the object's vertical axis; a tall tower is in frame if any stretch of it is.
+  const steps = 8;
+  for (let i = 0; i <= steps; i++) {
+    const d = sub([base[0], base[1] + (height * i) / steps, base[2]], cam.position);
+    const depth = dot(d, f);
+    if (depth < 0.1) continue;
+    if (Math.abs(dot(d, right)) - margin > depth * tanH || Math.abs(dot(d, up)) - margin > depth * tanV) continue;
+    if (size / depth >= tanV * 2 * 0.02) return true; // at least 2% of the frame height
+  }
+  return false;
+}
+
+function aspectRatio(aspect: string): number {
+  const [w, h] = aspect.split(":").map(Number);
+  return w && h ? w / h : 16 / 9;
+}
+
+/**
+ * A finished video must show something. For every shot, check that at least one model is in
+ * the camera's view at the start, middle or end of the shot; a camera that films only sky or
+ * bare ground for a whole shot is re-aimed at the shot's subject. Returns how many were fixed.
+ */
+export function reaimEmptyShots(spec: SceneSpec, warnings: string[] = []): number {
+  const assetById = new Map(spec.assets.map((a) => [a.id, a]));
+  const subjects = spec.objects.filter((o) => o.visible && assetById.get(o.assetId) && assetById.get(o.assetId)!.kind !== "terrain");
+  if (subjects.length === 0) return 0;
+  const aspect = aspectRatio(spec.output.aspect);
+  const hero: SceneObject =
+    subjects.find((o) => assetById.get(o.assetId)!.rig === "humanoid") ??
+    subjects.find((o) => ["character", "creature"].includes(assetById.get(o.assetId)!.kind)) ??
+    subjects[0]!;
+
+  let sampler = new SceneSampler(spec);
+  const sees = (cameraId: string, t: number) => {
+    const cam = sampler.sampleCamera(cameraId, t);
+    return subjects.some((o) => {
+      const asset = assetById.get(o.assetId)!;
+      const s = sampler.sampleObject(o.id, t);
+      return inFrame(cam, s.position, assetHeight(asset, s.scale), assetRadius(asset, s.scale), aspect);
+    });
+  };
+
+  let fixed = 0;
+  const done = new Set<string>();
+  for (const shot of spec.shots) {
+    const cam = spec.cameras.find((c) => c.id === shot.cameraId);
+    if (!cam || done.has(cam.id)) continue;
+    const edge = Math.min(0.05, (shot.end - shot.start) / 4);
+    if ([shot.start + edge, (shot.start + shot.end) / 2, shot.end - edge].some((t) => sees(cam.id, t))) continue;
+
+    const subject = (cam.attach.mode !== "world" && subjects.find((o) => o.id === cam.attach.objectId)) || hero;
+    const asset = assetById.get(subject.assetId)!;
+    const keys = cam.keyframes.map((key) => {
+      const world = sampler.sampleCamera(cam.id, key.t).position;
+      const s = sampler.sampleObject(subject.id, key.t);
+      const h = Math.max(assetHeight(asset, s.scale), 0.2);
+      const r = assetRadius(asset, s.scale);
+      const aim: Vec3 = [s.position[0], s.position[1] + h * 0.6, s.position[2]];
+      // The distance at which the subject fills about 70% of the frame height.
+      const ideal = (Math.max(h, r * 2) * 1.4) / (2 * Math.tan((key.fov * Math.PI) / 360));
+      let position = world;
+      const away = len(sub(world, aim));
+      if (away > ideal * 6 || away < r * 1.15 + 0.2) {
+        // Far too distant (or inside the subject): stand in front of it instead, on the side the camera was on.
+        let dx = world[0] - s.position[0];
+        let dz = world[2] - s.position[2];
+        let flat = Math.hypot(dx, dz);
+        if (flat < 0.05) {
+          const heading = (s.rotation[1] * Math.PI) / 180;
+          dx = Math.sin(heading);
+          dz = Math.cos(heading);
+          flat = 1;
+        }
+        position = [s.position[0] + (dx / flat) * ideal * 1.2, Math.max(0.3, s.position[1] + h * 0.7), s.position[2] + (dz / flat) * ideal * 1.2];
+      }
+      return { ...key, position: round3(position), target: [0, round(h * 0.6), 0] as Vec3 };
+    });
+    cam.attach = { mode: "look_at", objectId: subject.id };
+    cam.keyframes = keys;
+    done.add(cam.id);
+    fixed++;
+    warnings.push(`Camera "${cam.name || cam.id}" showed no models during "${shot.name || shot.id}"; it was re-aimed at "${subject.name || subject.id}".`);
+    sampler = new SceneSampler(spec);
+  }
+  return fixed;
 }
 
 function defaultCamera(spec: SceneSpec, id: string): Camera {
