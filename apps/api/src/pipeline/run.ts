@@ -416,6 +416,8 @@ async function finishDirector(ctx: Ctx): Promise<Outcome> {
   return { kind: "done", result: "scene" };
 }
 
+const GENERIC_FAILURES = new Set(["gemini_unavailable", "gemini_invalid_output", "meshy_unavailable", "meshy_credits", "storage_error", "internal", "interrupted"]);
+
 const HANDLERS: Partial<Record<StageId, (ctx: Ctx) => Promise<Outcome>>> = {
   understanding_prompt: understandPrompt,
   planning_scene: planTheScene,
@@ -498,7 +500,11 @@ export async function advanceJob(env: Env, jobId: string): Promise<number | null
       log("job_retry", { job: jobId, stage: job.stage, attempt: job.attempts, code: failure.code });
       return Math.min(120, 8 * 2 ** job.attempts);
     }
-    await failJob(env, job, failure.code, failure.message);
+    // Outages and internal faults get the plain, actionable message; the technical detail goes to the log.
+    // Failures about the user's own content (a model Meshy could not build, a rejected prompt, a limit) keep their specifics.
+    const generic = GENERIC_FAILURES.has(failure.code);
+    if (generic) log("job_failure_detail", { job: jobId, stage: job.stage, code: failure.code, detail: failure.message });
+    await failJob(env, job, failure.code, generic ? undefined : failure.message);
     return null;
   } finally {
     await env.DB.prepare("UPDATE jobs SET lock_until = 0 WHERE id = ? AND status IN ('queued', 'running')").bind(jobId).run();

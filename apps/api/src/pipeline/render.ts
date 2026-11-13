@@ -198,8 +198,22 @@ export async function storeUpload(env: Env, id: string, workerId: string, kind: 
   if (length > (kind === "video" ? MAX_VIDEO_BYTES : 5 * 1024 * 1024)) throw new HttpError(413, "storage_error", "The uploaded file is too large.");
   const key = kind === "video" ? videoKey(row.user_id, row.id) : thumbnailKey(row.user_id, row.id);
   try {
-    await env.BUCKET.put(key, request.body, { httpMetadata: { contentType: kind === "video" ? "video/mp4" : "image/jpeg" } });
+    // R2 needs a stream of known length. On Workers the upload is piped straight through a
+    // FixedLengthStream (a 4K video is never held in memory); elsewhere it is buffered.
+    const Fixed = (globalThis as { FixedLengthStream?: new (length: number) => { readable: ReadableStream; writable: WritableStream } }).FixedLengthStream;
+    let payload: ReadableStream | ArrayBuffer;
+    let pump: Promise<void> | null = null;
+    if (Fixed) {
+      const fixed = new Fixed(length);
+      pump = request.body.pipeTo(fixed.writable);
+      payload = fixed.readable;
+    } else {
+      payload = await request.arrayBuffer();
+      if (payload.byteLength !== length) throw new HttpError(400, "storage_error", "The upload was shorter than its declared length.");
+    }
+    await Promise.all([env.BUCKET.put(key, payload, { httpMetadata: { contentType: kind === "video" ? "video/mp4" : "image/jpeg" } }), pump]);
   } catch (error) {
+    if (error instanceof HttpError) throw error;
     log("r2_upload_failed", { render: id, kind, error: String(error) });
     throw new HttpError(507, "storage_error");
   }
