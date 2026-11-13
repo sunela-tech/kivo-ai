@@ -28,6 +28,37 @@ from .manifest import ManifestError, validate_job
 log = logging.getLogger("kivo.renderer")
 
 
+def _span(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    if seconds >= 5400:
+        return f"{seconds / 3600:.0f} hours"
+    if seconds >= 90:
+        return f"{seconds / 60:.0f} minutes"
+    return f"{seconds:.0f} seconds"
+
+
+def projected_overrun(first: tuple[float, int], now: float, done: int, total: int, deadline: float,
+                      *, min_frames: int = 2, min_seconds: float = 15.0, margin: float = 1.5) -> str | None:
+    """Can the remaining frames still finish before the deadline at the pace measured so far?
+
+    `first` is (time, frames done) when the first frame finished, so start-up cost is not counted.
+    Returns None while the job can still make it (or it is too early to tell); otherwise a sentence
+    saying why it cannot. A job is only given up on when it would overrun by more than `margin`,
+    because later shots can be lighter than the first ones.
+    """
+    started, base = first
+    measured = done - base
+    if measured < min_frames or now - started < min_seconds or done >= total:
+        return None
+    per_frame = (now - started) / measured
+    remaining = per_frame * (total - done)
+    left = max(0.0, deadline - now)
+    if remaining <= left * margin:
+        return None
+    return (f"at about {per_frame:.0f} s per frame on this render worker, the remaining {total - done} of {total} frames "
+            f"would take about {_span(remaining)}, but only {_span(left)} of the time limit is left")
+
+
 class Canceled(Exception):
     pass
 
@@ -197,6 +228,8 @@ class Worker:
         error: dict[str, Any] | None = None
         last_report = 0.0
         done = 0
+        pace: tuple[float, int] | None = None
+        too_slow: str | None = None
         with open(log_path, "w", encoding="utf-8") as log_file:
             self.child = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log_file, text=True, bufsize=1,
                                           cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -222,6 +255,15 @@ class Worker:
                     elif kind == "frame":
                         done = int(event["done"])
                         now = time.time()
+                        # Give up early on a job that cannot finish in time, instead of rendering for
+                        # hours and failing at the deadline: the user gets the answer in minutes.
+                        if pace is None:
+                            pace = (now, done)
+                        else:
+                            too_slow = projected_overrun(pace, now, done, total, deadline)
+                            if too_slow:
+                                child.kill()
+                                break
                         if now - last_report >= 2.0 or done == total:
                             last_report = now
                             self._report(job_id, phase="rendering", framesDone=done, framesTotal=total)
@@ -237,6 +279,8 @@ class Worker:
                 self.child = None
         if self.stopping:
             raise JobFailed("interrupted", "the render worker was shut down mid-job", True)
+        if too_slow:
+            raise JobFailed("render_timeout", f"stopped after {done} frames: {too_slow}", False)
         if time.time() >= deadline and code != 0:
             raise JobFailed("render_timeout", f"rendering exceeded the time limit after {done} of {total} frames", False)
         if code != 0:

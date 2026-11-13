@@ -40,6 +40,8 @@ cd services/renderer && pip install -r requirements.txt && KIVO_API_URL=… KIVO
 | `KIVO_RENDER_SAMPLES` | by quality | Override Cycles samples |
 | `KIVO_RENDER_THREADS` | all cores | Limit CPU threads |
 
+A worker also protects users from renders it cannot finish. After the first few frames it compares its measured pace with the job's time limit (set by the plan); if the remaining frames would overrun it by more than half, it stops and reports `render_timeout`, so the user is refunded and told within minutes instead of after hours. A CPU-only worker needs on the order of a minute per 4K frame — use a GPU for 1080p and above, and set `KIVO_MAX_PIXELS` low on small workers so they leave large jobs to capable ones.
+
 ## Safety model
 
 Scenes are data, never code. `manifest.py` re-validates every job (types,
