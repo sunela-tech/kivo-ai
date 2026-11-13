@@ -21,10 +21,10 @@ const EditorIndexPage = lazy(() => import("./pages/Editor").then((m) => ({ defau
 
 function SignedIn({ config }: { config: AppConfig }) {
   const { getToken } = useAuth();
-  useEffect(() => {
-    setTokenGetter(() => getToken());
-    return () => setTokenGetter(null);
-  }, [getToken]);
+  // Registered during render, not in an effect: child components start fetching in their own
+  // effects, which run before this component's would.
+  setTokenGetter(() => getToken());
+  useEffect(() => () => setTokenGetter(null), []);
 
   return (
     <SessionProvider config={config}>

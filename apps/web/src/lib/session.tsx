@@ -39,11 +39,13 @@ export function SessionProvider({ config, children }: { config: AppConfig; child
 
   // While jobs are running, keep the session fresh so quota and job badges are accurate everywhere.
   const running = (me?.activeJobs.length ?? 0) > 0;
+  const failed = !me && !!error;
   useEffect(() => {
     window.clearInterval(timer.current);
-    timer.current = window.setInterval(() => void refresh(), running ? 5000 : 60000);
+    // Poll quickly while work is running or the first load has not succeeded yet.
+    timer.current = window.setInterval(() => void refresh(), failed ? 3000 : running ? 5000 : 60000);
     return () => window.clearInterval(timer.current);
-  }, [running, refresh]);
+  }, [running, failed, refresh]);
 
   const setPreferredMode = useCallback(
     async (mode: "simple" | "advanced") => {
