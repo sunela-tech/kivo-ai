@@ -26,7 +26,8 @@ import type { Env } from "../env";
 import { Meshy, animationLibrary } from "../meshy";
 import { getPlans } from "../plans";
 import { globalMeshyCeiling, meshySpend, recordCost } from "../usage";
-import { PipelineError, bucket, log, newId, now, parseJson } from "../util";
+import { storage } from "../storage";
+import { PipelineError, log, newId, now, parseJson } from "../util";
 import { assetCacheKey, cancelPendingTasks, clipNames, loadAssets, tickAssets, type AssetRow } from "./assets";
 import { addWarnings, cancelJob, completeJob, failJob, loadJob, loadProject, loadScene, patchJob, saveScene, type JobRow, type ProjectRow } from "./jobs";
 
@@ -365,7 +366,7 @@ async function prepareRendering(ctx: Ctx): Promise<Outcome> {
       throw new PipelineError("invalid_scene", `The model "${link?.name ?? alias}" has not finished generating, so the scene cannot be rendered yet.`, false);
     }
     // The file must really be in storage: a render never starts with a missing model.
-    const head = await bucket(ctx.env).head(link.model_key).catch(() => null);
+    const head = await storage(ctx.env).head(link.model_key).catch(() => null);
     if (!head || head.size === 0) throw new PipelineError("storage_error", `The stored file for "${link.name}" is missing.`, false);
   }
 

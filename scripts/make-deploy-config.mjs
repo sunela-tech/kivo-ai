@@ -2,7 +2,9 @@
 /**
  * Write apps/api/wrangler.generated.jsonc — a deploy config derived from wrangler.jsonc.
  *
- *   --no-storage   leave out the R2 binding (the account has not enabled R2 yet)
+ *   --no-r2        leave out the R2 binding (the account has not enabled R2 yet)
+ *   --kv=<id>      bind that Workers KV namespace as MEDIA_KV, the fallback file store used
+ *                  when R2 is off (and kept readable after R2 is turned on)
  *   --embed-web    ship the built web app inside the Worker script instead of as Workers
  *                  static assets
  *
@@ -25,7 +27,12 @@ const source = readFileSync(join(api, "wrangler.jsonc"), "utf8");
 const config = JSON.parse(source.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
 delete config.$schema;
 
-if (flags.has("--no-storage")) delete config.r2_buckets;
+if (flags.has("--no-r2")) delete config.r2_buckets;
+const kv = [...flags].find((flag) => flag.startsWith("--kv="))?.slice(5);
+if (kv) {
+  if (!/^[0-9a-f]{32}$/.test(kv)) throw new Error(`--kv expects a KV namespace id (32 hex characters), got "${kv}"`);
+  config.kv_namespaces = [{ binding: "MEDIA_KV", id: kv }];
+}
 
 if (flags.has("--embed-web")) {
   const TYPES = {

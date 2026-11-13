@@ -9,6 +9,7 @@ import { media } from "./routes/media";
 import { projects } from "./routes/projects";
 import { renderService } from "./routes/renderService";
 import { webhooks } from "./routes/webhooks";
+import { findStorage } from "./storage";
 import { HttpError, log } from "./util";
 
 const app = new Hono<AppBindings>();
@@ -33,8 +34,10 @@ app.get("/api/health", (c) =>
       clerkWebhooks: !!c.env.CLERK_WEBHOOK_SECRET,
       renderService: !!c.env.RENDER_SERVICE_TOKEN,
       mediaSigning: !!c.env.SIGNING_SECRET,
-      storage: !!c.env.BUCKET,
+      storage: !!findStorage(c.env),
     },
+    // "r2", "kv" (the fallback for accounts without R2), "r2+kv", or null when there is none.
+    storageBackend: findStorage(c.env)?.kind ?? null,
   }),
 );
 

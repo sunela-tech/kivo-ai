@@ -8,6 +8,7 @@ import type { AssetRow } from "../pipeline/assets";
 import type { JobRow } from "../pipeline/jobs";
 import { getPlans } from "../plans";
 import { rateLimit } from "../ratelimit";
+import { findStorage } from "../storage";
 import { usageSummary } from "../usage";
 import { HttpError, fetchWithTimeout, log, now } from "../util";
 
@@ -19,7 +20,7 @@ config.get("/", (c) => {
     clerkPublishableKey: c.env.CLERK_PUBLISHABLE_KEY,
     plans: PLAN_IDS.map((id) => planDto(plans[id])),
     // False when the deployment has no file storage: the app then explains that generation is not available yet.
-    storageReady: !!c.env.BUCKET,
+    storageReady: !!findStorage(c.env),
     stages: STAGES,
     styles: VISUAL_STYLES,
   });
@@ -172,10 +173,7 @@ account.delete("/assets/:id", async (c) => {
   if (!asset) throw new HttpError(404, "internal", "Model not found.");
   const uses = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM project_assets WHERE asset_id = ?").bind(asset.id).first<{ n: number }>();
   if ((uses?.n ?? 0) > 0) throw new HttpError(409, "internal", "This model is used by a project. Delete the project, or remove the model from its scene, first.");
-  if (c.env.BUCKET) {
-    const listed = await c.env.BUCKET.list({ prefix: `users/${user.id}/assets/${asset.id}/` });
-    if (listed.objects.length) await c.env.BUCKET.delete(listed.objects.map((o) => o.key));
-  }
+  await findStorage(c.env)?.deletePrefix(`users/${user.id}/assets/${asset.id}/`);
   await c.env.DB.prepare("DELETE FROM assets WHERE id = ?").bind(asset.id).run();
   return c.json({ deleted: true });
 });
@@ -194,7 +192,7 @@ account.delete("/videos/:id", async (c) => {
   const user = c.get("user");
   const video = await c.env.DB.prepare("SELECT * FROM videos WHERE id = ? AND user_id = ?").bind(c.req.param("id"), user.id).first<VideoRow>();
   if (!video) throw new HttpError(404, "internal", "Video not found.");
-  await c.env.BUCKET?.delete([video.r2_key, video.thumbnail_key].filter((k): k is string => !!k));
+  await findStorage(c.env)?.delete([video.r2_key, video.thumbnail_key].filter((k): k is string => !!k));
   const next = await c.env.DB.prepare("SELECT id, thumbnail_key FROM videos WHERE project_id = ? AND id != ? ORDER BY created_at DESC LIMIT 1").bind(video.project_id, video.id).first<{ id: string; thumbnail_key: string | null }>();
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM videos WHERE id = ?").bind(video.id),
@@ -210,16 +208,10 @@ account.delete("/videos/:id", async (c) => {
   return c.json({ deleted: true });
 });
 
-/** Remove everything Kivo stores for a user: files in R2 and every row in D1. */
+/** Remove everything Kivo stores for a user: every stored file and every row in D1. */
 export async function deleteUserData(env: Env, userId: string): Promise<void> {
   await env.DB.prepare("UPDATE jobs SET cancel_requested = 1 WHERE user_id = ? AND status IN ('queued', 'running')").bind(userId).run();
-  let cursor: string | undefined;
-  do {
-    if (!env.BUCKET) break;
-    const page = await env.BUCKET.list({ prefix: `users/${userId}/`, cursor, limit: 500 });
-    if (page.objects.length) await env.BUCKET.delete(page.objects.map((o) => o.key));
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
+  await findStorage(env)?.deletePrefix(`users/${userId}/`);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM project_assets WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)").bind(userId),
     env.DB.prepare("DELETE FROM videos WHERE user_id = ?").bind(userId),

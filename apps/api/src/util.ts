@@ -36,15 +36,6 @@ export class PipelineError extends Error {
   }
 }
 
-/**
- * The R2 bucket, or a clear error when this deployment has no storage.
- * Generation cannot work without it, so it is refused up front instead of failing halfway.
- */
-export function bucket(env: { BUCKET?: R2Bucket }): R2Bucket {
-  if (!env.BUCKET) throw new HttpError(503, "storage_unavailable");
-  return env.BUCKET;
-}
-
 export function utcDay(date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
@@ -33,15 +33,22 @@ export interface Harness {
   db: D1Database;
   /** The test bucket (also `env.BUCKET` unless a test removes storage). */
   bucket: R2Bucket;
+  /** A KV namespace for the fallback file store. Not bound by default: pass `{ MEDIA_KV: h.kv }`-style vars to use it. */
+  kv: KVNamespace;
   close: () => Promise<void>;
 }
 
 let keys: ReturnType<typeof generateKeyPair> | undefined;
 
-const migration = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "migrations", "0001_init.sql"), "utf8");
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+const migration = readdirSync(migrationsDir)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(join(migrationsDir, name), "utf8"))
+  .join("\n");
 
 export async function createHarness(vars: Partial<Env> = {}): Promise<Harness> {
-  const options = { modules: true, script: "export default { fetch() { return new Response('ok') } }", compatibilityDate: "2026-10-01", d1Databases: { DB: "test-db" }, r2Buckets: { BUCKET: "test-bucket" } };
+  const options = { modules: true, script: "export default { fetch() { return new Response('ok') } }", compatibilityDate: "2026-10-01", d1Databases: { DB: "test-db" }, r2Buckets: { BUCKET: "test-bucket" }, kvNamespaces: { MEDIA_KV: "test-kv" } };
   const convert = (miniflare as unknown as { convertV4MiniflareOptions?: (o: unknown) => unknown }).convertV4MiniflareOptions;
   const mf = new Miniflare((convert ? convert(options) : options) as never);
   const db = (await mf.getD1Database("DB")) as unknown as D1Database;
@@ -74,6 +81,7 @@ export async function createHarness(vars: Partial<Env> = {}): Promise<Harness> {
   });
 
   const r2 = (await mf.getR2Bucket("BUCKET")) as unknown as R2Bucket;
+  const kv = (await mf.getKVNamespace("MEDIA_KV")) as unknown as KVNamespace;
   const env: Env = {
     DB: db,
     BUCKET: r2,
@@ -125,6 +133,7 @@ export async function createHarness(vars: Partial<Env> = {}): Promise<Harness> {
     calls,
     db,
     bucket: r2,
+    kv,
     on: (match, handler) => void handlers.push({ match, handler }),
     token,
     request,

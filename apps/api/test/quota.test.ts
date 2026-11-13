@@ -230,6 +230,7 @@ describe("a deployment without file storage", () => {
 
     const health = await bare.json("/api/health");
     expect(health.body.configured.storage).toBe(false);
+    expect(health.body.storageBackend).toBeNull();
     expect((await bare.json("/api/config")).body.storageReady).toBe(false);
 
     // Everything that does not need files still works.
@@ -240,7 +241,7 @@ describe("a deployment without file storage", () => {
     const started = await bare.json(`/api/projects/${project.body.project.id}/generate`, { token, body: {} });
     expect(started.status).toBe(503);
     expect(started.body.error.code).toBe("storage_unavailable");
-    expect(started.body.error.message).toMatch(/Cloudflare R2 is not enabled/);
+    expect(started.body.error.message).toMatch(/no file storage/);
     expect(started.body.error.message).toMatch(/Nothing was charged/);
     expect((await bare.db.prepare("SELECT COUNT(*) AS n FROM jobs").first<{ n: number }>())!.n).toBe(0);
     expect((await bare.json("/api/me", { token })).body.usage.used).toBe(0);

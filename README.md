@@ -17,20 +17,20 @@ Simple Mode does all of that from one prompt. Advanced Mode opens a full 3D edit
                                       Queue "kivo-pipeline"  ──▶ stage handlers:
                                         1 understand prompt  ──────────────────▶  Gemini (structured JSON)
                                         2 plan scene         ──────────────────▶  Gemini
-                                        3 models  4 textures 5 rig + clips ────▶  Meshy  ──▶ GLBs cached in R2
+                                        3 models  4 textures 5 rig + clips ────▶  Meshy  ──▶ GLBs cached in storage
                                         6 animation  7 cameras/lights ─────────▶  Gemini ──▶ validated SceneSpec (D1)
                                         8 render job queued (priority by plan)
                                                                          ▲
                                       /api/render/* (token) ◀── claim · progress · upload · complete ── Blender render
                                         9 rendering (frames)  10 encoding  11 saving                    workers (pull)
-                                       12 completed — only after the MP4 is in R2 and verified
+                                       12 completed — only after the MP4 is stored and verified
  <video> / download ◀─ signed URL ─── /api/media/o/… (HMAC, expiring, Range)
 ```
 
 | Part | Where | What it does |
 |---|---|---|
 | Web app | `apps/web` | React 19, TypeScript, Tailwind 4, Clerk, React Three Fiber editor |
-| API + orchestrator | `apps/api` | Cloudflare Worker: Hono routes, D1, R2, Queues, cron sweeper |
+| API + orchestrator | `apps/api` | Cloudflare Worker: Hono routes, D1, R2 (or Workers KV when R2 is not enabled), Queues, cron sweeper |
 | Shared contracts | `packages/shared` | Plans, the 12 stages, the validated `SceneSpec`, the scene sampler, Gemini contracts, AI Director operations |
 | Render service | `services/renderer` | Python + Blender 5.2 LTS + ffmpeg; pulls jobs, renders, encodes, verifies, uploads |
 
@@ -102,14 +102,14 @@ cd services/renderer && pip install -r requirements-dev.txt && python -m pytest 
 ```
 
 - `packages/shared` — plans, stage list, scene validation and repair, sampler, Gemini contracts, AI Director operations.
-- `apps/api` — the real Worker code against local D1 and R2 (Miniflare) with Clerk, Gemini and Meshy scripted: authentication, plan enforcement, quota and refunds, privacy, the render-service protocol, the whole pipeline, the AI Director, webhooks.
+- `apps/api` — the real Worker code against local D1, R2 and KV (Miniflare) with Clerk, Gemini and Meshy scripted: authentication, plan enforcement, quota and refunds, privacy, the render-service protocol, the whole pipeline, the AI Director, webhooks.
 - `services/renderer` — sampler parity with the TypeScript sampler, job validation, H.264 encoding and verification, and a real Blender render.
 
 ## What Kivo does not pretend
 
 - **Rigging** uses Meshy's auto-rigger, which only handles clear two-legged humanoids. Everything else — and any humanoid Meshy declines — is kept, labelled "rigid body" in the UI, and animated with keyframes and procedural motion (hover, hop, sway, spin…). It is never shown as rigged.
 - **Progress bars** appear only where a real number exists: Meshy's task progress and Blender's frame count. Other stages show that they are running, without a percentage.
-- **"Completed"** is set only after the MP4 is stored in R2 and passes verification (decodes as H.264 with the expected frame count and size on the render worker; container and codec checked again by the Worker).
+- **"Completed"** is set only after the MP4 is in file storage and passes verification (decodes as H.264 with the expected frame count and size on the render worker; container and codec checked again by the Worker).
 - **Blender never runs on Workers.** Rendering needs a separate machine running `services/renderer`. Without one, jobs wait in the queue and then fail with a refund and a clear message.
 - **Sky and atmosphere** are world lighting in Blender, not Meshy models. Every visible object, including the ground, is a Meshy model.
 - **Audio** is not generated; videos are silent.

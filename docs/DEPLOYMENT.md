@@ -11,8 +11,8 @@ Kivo has three deployable parts:
 ### Requirements
 
 - **Workers Paid plan.** The pipeline's stage handlers (scene validation, model downloads into R2, several Meshy calls per tick) need more than the Free plan's 10 ms CPU and 50 subrequests per invocation. Queues and R2 are also metered there.
-- **R2 enabled** on the account. This is a one-time switch in the dashboard (R2 → enable) and cannot be done through the API.
-- An API token for wrangler with **Workers Scripts, D1, Queues and R2: Edit**.
+- **R2 enabled** on the account, for anything beyond a small deployment. This is a one-time switch in the dashboard (R2 → enable) and cannot be done through the API. Without it Kivo stores files in Workers KV instead — see [File storage](#file-storage).
+- An API token for wrangler with **Workers Scripts, D1, Queues, Workers KV Storage and R2: Edit**.
 
 ### Deploy
 
@@ -26,7 +26,7 @@ That script creates the bucket and queues if they are missing, applies the D1 mi
 
 Two situations it handles for you:
 
-- **R2 not enabled yet.** The site is deployed without file storage. Sign-in, the dashboard, plans and settings work; starting a generation or render is refused with a message saying storage is not enabled, and nothing is charged. `GET /api/health` shows `"storage": false`. Enable R2 in the dashboard and run the script again.
+- **R2 not enabled yet.** The script creates a Workers KV namespace (`kivo-media`) and deploys with that as file storage, so models and videos are still saved. `GET /api/health` shows `"storageBackend": "kv"`. See [File storage](#file-storage) for its limits and how to move to R2.
 - **Static-asset upload cannot authenticate.** Wrangler uploads the web app's files with a separate upload token in the `Authorization` header. Behind a proxy that injects its own `Authorization` header (some managed dev environments), that step fails with 401. Run the script with `KIVO_EMBED_WEB=1` to ship the built web app inside the Worker script instead:
 
 ```bash
@@ -112,9 +112,28 @@ Sizing, measured on a 4-core CPU with Cycles: a 480p frame of a four-model scene
 
 Workers claim the highest-priority queued job first (Studio > Ultra > Pro > Free), so paid users are served first whenever there is a backlog. Set `KIVO_MAX_PIXELS` on small workers so they leave 4K jobs for bigger ones.
 
+
+## File storage
+
+Generated models, thumbnails and finished MP4s are private files served only through signed, expiring links. Where they live depends on what the deployment has:
+
+| `storageBackend` in `/api/health` | Meaning |
+|---|---|
+| `r2` | R2 bucket `kivo-media`. The normal setup. |
+| `kv` | R2 is not enabled. Files are stored in the Workers KV namespace `kivo-media`, split into parts of up to 16 MB, with an index in the D1 `files` table. |
+| `r2+kv` | R2 was enabled after a KV deployment. New files go to R2; files saved earlier in KV stay readable and are deleted from KV when their project is deleted. |
+| `null` | No storage bound. Generation is refused with a clear message and nothing is charged. |
+
+The KV store behaves the same for users (uploads are length-checked, the MP4 is verified after it is stored, playback supports seeking), but it is meant as a stopgap:
+
+- Workers KV's free allowance is **1 GB stored and 1,000 writes a day**. Kivo stops accepting new generations at 900 MB (`KV_STORAGE_LIMIT_MB`) with a "storage is full" message, before any model is generated or anything is charged.
+- A video with its models takes roughly 20–80 MB, so the free allowance holds a few dozen videos.
+
+To move to R2: enable R2 in the dashboard and run `scripts/setup-cloudflare.sh` again. Nothing needs migrating.
+
 ## 4. Check the deployment
 
-1. `curl https://<host>/api/health` — every integration `true`, including `storage`.
+1. `curl https://<host>/api/health` — every integration `true`, including `storage`; `storageBackend` says where files go.
 2. Sign up, create a video in Simple Mode, and watch the stages advance. With no render worker running, the job waits at "Preparing rendering" and fails with a refund after `RENDER_QUEUE_TIMEOUT_MINUTES`.
 3. Start a render worker; the next job reaches "Completed" with a playable, downloadable MP4.
 4. Subscribe to Pro with a Stripe test card on the Subscription page; `/api/me` then reports the Pro limits and new renders have no watermark.

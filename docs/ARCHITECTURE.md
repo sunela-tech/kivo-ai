@@ -17,14 +17,14 @@ A generation is a row in `jobs` advanced by queue messages. Each delivery takes 
 | 1 | Understanding prompt | Gemini reads the idea and returns a brief (or a polite rejection) |
 | 2 | Planning 3D scene | Gemini chooses the models and the world; cost ceilings are checked; asset rows are created or reused |
 | 3 | Generating models with Meshy | Text to 3D *preview* tasks; progress is the mean of Meshy's own task progress |
-| 4 | Preparing textures | Text to 3D *refine* tasks; GLBs and thumbnails are copied into R2 |
+| 4 | Preparing textures | Text to 3D *refine* tasks; GLBs and thumbnails are copied into file storage (R2, or Workers KV when R2 is off) |
 | 5 | Rigging characters | Meshy rigging for humanoids, then library clips (and optional Text to Motion) |
 | 6 | Creating animations | Gemini places objects and choreographs them, knowing which clips really exist |
 | 7 | Adjusting cameras | Gemini designs cameras, the edit and lighting against the sampled motion; then code moves cameras out of models and above ground, and matches walk/run clips and their speed to how fast each character really travels |
 | 8 | Preparing rendering | The export is clamped to the plan; a render job is queued with the plan's priority |
 | 9 | Rendering video | A render worker reports frames rendered — the only percentage shown |
 | 10 | Encoding MP4 | ffmpeg → H.264, yuv420p, faststart |
-| 11 | Saving video | Upload to R2 through the Worker |
+| 11 | Saving video | Upload to file storage through the Worker |
 | 12 | Completed | Set only after the stored file passes verification |
 
 Stages 9–11 are driven by the render service's reports (`/api/render/*`), not by the queue.

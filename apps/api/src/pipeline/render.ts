@@ -2,7 +2,8 @@ import { normalizeScene, type SceneSpec, type StageId } from "@kivo/shared";
 import type { Env } from "../env";
 import { pruneRateLimits } from "../ratelimit";
 import { recordCost } from "../usage";
-import { HttpError, bucket, log, newId, now, parseJson } from "../util";
+import { storage } from "../storage";
+import { HttpError, log, newId, now, parseJson } from "../util";
 import type { ClipMap } from "./assets";
 import { addWarnings, completeJob, failJob, loadJob, loadScene, patchJob } from "./jobs";
 import { enqueue } from "./run";
@@ -198,23 +199,11 @@ export async function storeUpload(env: Env, id: string, workerId: string, kind: 
   if (length > (kind === "video" ? MAX_VIDEO_BYTES : 5 * 1024 * 1024)) throw new HttpError(413, "storage_error", "The uploaded file is too large.");
   const key = kind === "video" ? videoKey(row.user_id, row.id) : thumbnailKey(row.user_id, row.id);
   try {
-    // R2 needs a stream of known length. On Workers the upload is piped straight through a
-    // FixedLengthStream (a 4K video is never held in memory); elsewhere it is buffered.
-    const Fixed = (globalThis as { FixedLengthStream?: new (length: number) => { readable: ReadableStream; writable: WritableStream } }).FixedLengthStream;
-    let payload: ReadableStream | ArrayBuffer;
-    let pump: Promise<void> | null = null;
-    if (Fixed) {
-      const fixed = new Fixed(length);
-      pump = request.body.pipeTo(fixed.writable);
-      payload = fixed.readable;
-    } else {
-      payload = await request.arrayBuffer();
-      if (payload.byteLength !== length) throw new HttpError(400, "storage_error", "The upload was shorter than its declared length.");
-    }
-    await Promise.all([bucket(env).put(key, payload, { httpMetadata: { contentType: kind === "video" ? "video/mp4" : "image/jpeg" } }), pump]);
+    // Streamed straight into storage with its declared length; a short or long upload is rejected and nothing is kept.
+    await storage(env).put(key, request.body as ReadableStream<Uint8Array>, { contentType: kind === "video" ? "video/mp4" : "image/jpeg", size: length });
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    log("r2_upload_failed", { render: id, kind, error: String(error) });
+    log("storage_upload_failed", { render: id, kind, error: String(error) });
     throw new HttpError(507, "storage_error");
   }
   await env.DB.prepare(`UPDATE render_jobs SET ${kind === "video" ? "video_key" : "thumbnail_key"} = ?, lease_expires_at = ? WHERE id = ?`).bind(key, now() + LEASE_MS, id).run();
@@ -231,11 +220,12 @@ function indexOfBytes(haystack: Uint8Array, needle: string): number {
 
 /** Is the stored object a streamable H.264 MP4? (ISO BMFF `ftyp`, front-loaded `moov`, `avc1` sample entry.) */
 export async function looksLikeH264Mp4(env: Env, key: string, expectedBytes: number): Promise<string | null> {
-  const head = await bucket(env).head(key);
+  const store = storage(env);
+  const head = await store.head(key);
   if (!head) return "the video file is not in storage";
   if (head.size < 1024) return "the video file is too small to be a video";
   if (expectedBytes && head.size !== expectedBytes) return `the stored file is ${head.size} bytes but the worker reported ${expectedBytes}`;
-  const object = await bucket(env).get(key, { range: { offset: 0, length: Math.min(head.size, 256 * 1024) } });
+  const object = await store.get(key, { offset: 0, length: Math.min(head.size, 256 * 1024) });
   if (!object) return "the video file could not be read back";
   const bytes = new Uint8Array(await object.arrayBuffer());
   if (indexOfBytes(bytes.subarray(0, 16), "ftyp") !== 4) return "the file is not an MP4 container";
@@ -246,7 +236,7 @@ export async function looksLikeH264Mp4(env: Env, key: string, expectedBytes: num
 
 /**
  * A worker says the video is done. Nothing is trusted: the object must be in
- * R2, be the reported size, be an H.264 MP4, and match the job's frame count
+ * storage, be the reported size, be an H.264 MP4, and match the job's frame count
  * and dimensions. Only then does a `videos` row exist and the job complete.
  */
 export async function completeRender(
@@ -268,7 +258,7 @@ export async function completeRender(
 
   if (problem) {
     log("render_verification_failed", { render: id, problem });
-    if (row.video_key) await bucket(env).delete(row.video_key).catch(() => undefined);
+    if (row.video_key) await storage(env).delete(row.video_key).catch(() => undefined);
     await env.DB.prepare("UPDATE render_jobs SET status = 'failed', error_code = 'video_invalid', error_message = ?, finished_at = ? WHERE id = ?").bind(problem, now(), id).run();
     await failJob(env, job, "video_invalid", `The rendered file was rejected: ${problem}. Your quota was not charged — try again.`);
     throw new HttpError(422, "video_invalid", problem);

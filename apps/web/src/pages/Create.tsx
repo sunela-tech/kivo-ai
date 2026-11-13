@@ -286,7 +286,7 @@ export function CreatePage() {
       <div className="mt-5 space-y-4">
         {!config.storageReady && (
           <Notice tone="warn" title="Video generation isn't switched on yet">
-            This Kivo deployment has no file storage yet (Cloudflare R2 is not enabled on its account), so 3D models and videos can't be saved. You can sign in, explore the app and manage your plan; generating starts working as soon as storage is enabled.
+            This Kivo deployment has no file storage yet, so 3D models and videos can't be saved. You can sign in, explore the app and manage your plan; generating starts working as soon as storage is enabled.
           </Notice>
         )}
         {error && (

@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../env";
 import { verifySignedPath } from "../signing";
-import { HttpError, bucket } from "../util";
+import { storage } from "../storage";
+import { HttpError } from "../util";
 
 /**
- * Private media delivery. The bucket has no public access; every object is
+ * Private media delivery. File storage has no public access; every object is
  * served through this route, which requires a valid, unexpired signature for
  * that exact object (issued only to its owner by authenticated API routes).
  * Range requests are supported so video can seek and stream.
@@ -37,13 +38,14 @@ media.on(["GET", "HEAD"], "/o/:key", async (c) => {
   }
   if (!key.startsWith("users/") || key.includes("..")) throw new HttpError(400, "internal", "Malformed media link.");
 
-  const head = await bucket(c.env).head(key);
+  const store = storage(c.env);
+  const head = await store.head(key);
   if (!head) throw new HttpError(404, "internal", "This file no longer exists.");
   const headers = new Headers({
-    "content-type": head.httpMetadata?.contentType ?? "application/octet-stream",
+    "content-type": head.contentType,
     "accept-ranges": "bytes",
     "cache-control": "private, max-age=3600",
-    etag: head.httpEtag,
+    etag: head.etag,
     "x-content-type-options": "nosniff",
   });
   const download = c.req.query("dl");
@@ -58,7 +60,7 @@ media.on(["GET", "HEAD"], "/o/:key", async (c) => {
     headers.set("content-length", String(head.size));
     return new Response(null, { status: 200, headers });
   }
-  const object = await bucket(c.env).get(key, range ? { range } : undefined);
+  const object = await store.get(key, range ?? undefined);
   if (!object) throw new HttpError(404, "internal", "This file no longer exists.");
   if (range) {
     headers.set("content-range", `bytes ${range.offset}-${range.offset + range.length - 1}/${head.size}`);
