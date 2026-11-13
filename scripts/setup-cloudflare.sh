@@ -14,7 +14,26 @@ cd "$(dirname "$0")/.."
 step() { printf '\n== %s\n' "$1"; }
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
-ok_if_exists() { "$@" >"$LOG" 2>&1 || grep -qiE "already exists|already taken|is taken|10004|11009" "$LOG" || { cat "$LOG"; return 1; }; tail -n 2 "$LOG"; }
+# Runs a create command; "already exists" counts as success. When Cloudflare asks to slow down
+# (code 971), waits as long as it says and tries again, up to three times.
+ok_if_exists() {
+  local attempt wait_s
+  for attempt in 1 2 3; do
+    if "$@" >"$LOG" 2>&1 || grep -qiE "already exists|already taken|is taken|10004|11009" "$LOG"; then
+      tail -n 2 "$LOG"
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ] && grep -qiE "code: 971|throttling your request" "$LOG"; then
+      wait_s="$(grep -oiE "wait [0-9]+ second" "$LOG" | grep -oE "[0-9]+" | head -n 1)"
+      wait_s="${wait_s:-60}"
+      echo "Cloudflare asked to slow down; waiting ${wait_s}s (attempt $attempt of 3)..."
+      sleep "$((wait_s + 2))"
+      continue
+    fi
+    cat "$LOG"
+    return 1
+  done
+}
 
 CONFIG="wrangler.jsonc"
 FLAGS=""

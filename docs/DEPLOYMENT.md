@@ -127,7 +127,7 @@ Generated models, thumbnails and finished MP4s are private files served only thr
 The KV store behaves the same for users (uploads are length-checked, the MP4 is verified after it is stored, playback supports seeking), but it is meant as a stopgap:
 
 - Workers KV's free allowance is **1 GB stored and 1,000 writes a day**. Kivo stops accepting new generations at 900 MB (`KV_STORAGE_LIMIT_MB`) with a "storage is full" message, before any model is generated or anything is charged.
-- A video with its models takes roughly 20–80 MB, so the free allowance holds a few dozen videos.
+- A Free-plan video with its four models measured about 22 MB (the models and their animation clips are most of it; the 480p MP4 itself is under 1 MB), so the free allowance holds a few dozen videos. Higher plans use larger models.
 
 To move to R2: enable R2 in the dashboard and run `scripts/setup-cloudflare.sh` again. Nothing needs migrating.
 
