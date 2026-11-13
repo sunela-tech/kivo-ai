@@ -399,7 +399,7 @@ describe("every shot shows something", () => {
 
   it("lifts a character that was sunk into the ground", () => {
     const scene = demoScene();
-    scene.tracks = scene.tracks.filter((t) => t.objectId !== "hero" || t.type !== "transform");
+    scene.tracks = scene.tracks.filter((t) => t.type !== "transform" || t.objectId !== "hero");
     scene.objects[0]!.position = [0, -3, -4];
     const { spec } = normalizeScene(scene);
     expect(spec.objects.find((o) => o.id === "hero")!.position).toEqual([0, 0, -4]);
