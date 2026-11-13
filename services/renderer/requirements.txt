@@ -1,0 +1,4 @@
+# Blender 5.2 LTS as a Python module (requires Python 3.13), plus the worker's HTTP client.
+bpy==5.2.4
+numpy>=2.0
+requests>=2.32
