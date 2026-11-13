@@ -40,6 +40,8 @@ def run(job_path: str, assets_dir: str, frames_dir: str, first: int = 1, last: i
     total = job["settings"]["frames"]
     fps = job["settings"]["fps"]
     last = min(total, last or total)
+    exposure = builder.meter_exposure(os.path.dirname(os.path.abspath(frames_dir)))
+    print(f"auto exposure: {exposure:+.2f} stops", file=sys.stderr)
     emit("ready", engine=builder.engine, frames=total, notes=builder.notes)
 
     sampler = builder.sampler

@@ -169,13 +169,27 @@ def _normalise(objects: list, armature, asset: dict, norm) -> None:
     s = asset["size"]["meters"] / extent
     cx = (lo[0] + hi[0]) / 2
     cy = (lo[1] + hi[1]) / 2
-    # Terrain sits with its top surface at ground level; everything else stands on it.
-    base = hi[2] if asset.get("kind") == "terrain" else lo[2]
+    squash = 1.0
+    if asset.get("kind") == "terrain":
+        # Generated "flat" ground still has relief. Characters stand at ground level, so the slab is
+        # pressed flat enough that nothing sinks into it, and its top surface is put at height 0.
+        thickness = dz * s
+        limit = terrain_thickness(asset["size"]["meters"])
+        if thickness > limit:
+            squash = limit / thickness
+        base = hi[2]
+    else:
+        base = lo[2]
     for o in objects:
         if o.parent is None:
             o.parent = norm
-    norm.scale = (s, s, s)
-    norm.location = (-cx * s, -cy * s, -base * s)
+    norm.scale = (s, s, s * squash)
+    norm.location = (-cx * s, -cy * s, -base * s * squash)
+
+
+def terrain_thickness(width_m: float) -> float:
+    """Maximum relief kept on a terrain model, in metres (matches the editor preview)."""
+    return max(0.12, min(0.6, width_m * 0.004))
 
 
 def _compile_action(armature, action) -> dict:
@@ -604,6 +618,53 @@ class SceneBuilder:
             return None
         return best["action"], (best["end"] - best["start"]) * best.get("speed", 1)
 
+    def meter_exposure(self, work_dir: str) -> float:
+        """Auto-exposure, like a camera's light meter.
+
+        Lighting written for a mood ("twilight", "night") can land far too dark or
+        blown out once path-traced. A few small probe frames are rendered through the
+        real shot cameras and the exposure is set so the picture reaches a sensible
+        average brightness for the scene's time of day. The scene's own exposure value
+        still applies on top as the user's compensation.
+        """
+        scene = self.scene
+        r = scene.render
+        saved = (r.resolution_percentage, getattr(scene.cycles, "samples", None))
+        r.resolution_percentage = max(10, min(100, round(100 * 200 / max(1, r.resolution_y))))
+        if self.engine.startswith("cycles"):
+            scene.cycles.samples = 8
+        duration = self.settings["duration"]
+        times = [duration * f for f in (0.3, 0.55, 0.8)]
+        user = float(self.spec["world"].get("exposure", 0))
+        target = exposure_target(float(self.spec["world"].get("ambient", 1)))
+        exposure = 0.0
+        probe = os.path.join(work_dir, "exposure_probe.png")
+        try:
+            for _ in range(3):
+                scene.view_settings.exposure = exposure
+                levels = []
+                for t in times:
+                    self.apply(t)
+                    shot = self.sampler.shot_at(t)
+                    self.set_camera(shot["cameraId"])
+                    self.render_still(probe)
+                    levels.append(image_luminance(probe))
+                measured = max(1e-4, sum(levels) / len(levels))
+                if abs(measured - target) < 0.03:
+                    break
+                # Brightness is roughly gamma-encoded, so compare in linear light; damp to avoid overshooting the tone curve.
+                stops = math.log2(srgb_to_linear(target) / max(1e-5, srgb_to_linear(measured)))
+                exposure = max(-3.0, min(6.0, exposure + 0.8 * stops))
+        finally:
+            r.resolution_percentage = saved[0]
+            if saved[1] is not None:
+                scene.cycles.samples = saved[1]
+            if os.path.exists(probe):
+                os.remove(probe)
+        final = max(-4.0, min(8.0, exposure + user))
+        scene.view_settings.exposure = final
+        return final
+
     def set_camera(self, camera_id: str) -> None:
         self.scene.camera = self.cameras[camera_id]
 
@@ -613,6 +674,28 @@ class SceneBuilder:
         bpy.ops.render.render(write_still=True)
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
             raise RuntimeError("Blender did not write the frame")
+
+
+def image_luminance(path: str) -> float:
+    """Mean display luminance (0..1) of a rendered image."""
+    img = bpy.data.images.load(path)
+    try:
+        n = img.size[0] * img.size[1] * img.channels
+        px = np.empty(n, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        px = px.reshape(-1, img.channels)
+        return float((0.2126 * px[:, 0] + 0.7152 * px[:, 1] + 0.0722 * px[:, 2]).mean())
+    finally:
+        bpy.data.images.remove(img)
+
+
+def exposure_target(ambient: float) -> float:
+    """How bright the picture should be on average, by time of day (the scene's sky light)."""
+    if ambient < 0.2:
+        return 0.20  # night: dark, but readable
+    if ambient < 0.7:
+        return 0.30  # dusk / interiors
+    return 0.38  # daylight
 
 
 def blend_frames(path_a: str, path_b: str, mix: float, out_path: str) -> None:

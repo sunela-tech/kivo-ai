@@ -1,0 +1,54 @@
+{
+  // Kivo — API, pipeline orchestrator and static host for the web app.
+  // Secrets (never stored here): GEMINI_API_KEY, MESHY_API_KEY, CLERK_SECRET_KEY,
+  // CLERK_WEBHOOK_SECRET, RENDER_SERVICE_TOKEN, SIGNING_SECRET.
+  // Set them with scripts/push-secrets.sh (reads apps/api/.dev.vars).
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kivo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kivo",
+      "database_id": "1d650ad1-2c46-4239-bd3f-554b1664219d",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "kivo-media" }],
+  "queues": {
+    "producers": [{ "binding": "PIPELINE", "queue": "kivo-pipeline" }],
+    "consumers": [
+      {
+        "queue": "kivo-pipeline",
+        "max_batch_size": 4,
+        "max_batch_timeout": 1,
+        "max_retries": 6,
+        "max_concurrency": 4,
+        "dead_letter_queue": "kivo-pipeline-dlq"
+      },
+      { "queue": "kivo-pipeline-dlq", "max_batch_size": 10, "max_batch_timeout": 5 }
+    ]
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "CLERK_PUBLISHABLE_KEY": "pk_test_aG9uZXN0LWR1Y2tsaW5nLTQxMi5jbGVyay5hY2NvdW50cy5kZXYk",
+    // Tried in order; the next one is used when a model is overloaded or out of quota.
+    "GEMINI_MODELS": "gemini-flash-latest,gemini-3.5-flash,gemini-2.5-flash,gemini-flash-lite-latest",
+    // JSON overrides for plan limits, same shape as DEFAULT_PLANS in packages/shared/src/plans.ts.
+    "KIVO_PLAN_OVERRIDES": "",
+    // Hard ceiling on Meshy credits spent per UTC day across all users.
+    "MESHY_DAILY_CREDIT_CEILING": "3000",
+    // Minutes a render may wait for a worker before the job fails and is refunded.
+    "RENDER_QUEUE_TIMEOUT_MINUTES": "30",
+    "RENDER_QUALITY": "standard"
+  }
+}

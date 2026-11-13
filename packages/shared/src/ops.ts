@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toId, type LibraryAction } from "./llm";
+import { toId, zVec3, type LibraryAction } from "./llm";
 import type { PlanLimits } from "./plans";
 import {
   ASSET_KINDS,
@@ -47,7 +47,7 @@ export const DIRECTOR_OPS = [
 export type DirectorOpName = (typeof DIRECTOR_OPS)[number];
 
 type J = Record<string, unknown>;
-const vec3: J = { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 };
+const vec3: J = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } }, required: ["x", "y", "z"] };
 const s = (description?: string): J => ({ type: "string", ...(description ? { description } : {}) });
 const n = (description?: string): J => ({ type: "number", ...(description ? { description } : {}) });
 const b = (): J => ({ type: "boolean" });
@@ -60,7 +60,6 @@ export const DirectorJsonSchema: J = o(
     cannotDo: s("If the request cannot be done with the available operations, explain why. Otherwise empty."),
     operations: {
       type: "array",
-      maxItems: 24,
       items: o(
         {
           op: e(DIRECTOR_OPS),
@@ -149,7 +148,6 @@ export const DirectorJsonSchema: J = o(
   ["summary", "cannotDo", "operations"],
 );
 
-const zVec3 = z.array(z.coerce.number().finite()).length(3);
 const zColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
 const OperationSchema = z.object({

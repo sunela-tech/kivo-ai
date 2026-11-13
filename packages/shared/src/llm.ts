@@ -31,26 +31,33 @@ import {
  */
 
 type J = Record<string, unknown>;
-const str = (description?: string): J => ({ type: "string", ...(description ? { description } : {}) });
-const num = (description?: string, minimum?: number, maximum?: number): J => ({
-  type: "number",
-  ...(description ? { description } : {}),
-  ...(minimum !== undefined ? { minimum } : {}),
-  ...(maximum !== undefined ? { maximum } : {}),
-});
-const int = (description?: string, minimum?: number, maximum?: number): J => ({ ...num(description, minimum, maximum), type: "integer" });
-const bool = (description?: string): J => ({ type: "boolean", ...(description ? { description } : {}) });
-const vec3 = (description?: string): J => ({ type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, ...(description ? { description } : {}) });
-const enumOf = (values: readonly string[], description?: string): J => ({ type: "string", enum: [...values], ...(description ? { description } : {}) });
-const obj = (properties: Record<string, J>, required: string[]): J => ({ type: "object", properties, required, additionalProperties: false });
-const arr = (items: J, maxItems?: number, description?: string): J => ({
-  type: "array",
-  items,
-  ...(maxItems ? { maxItems } : {}),
-  ...(description ? { description } : {}),
-});
 
-const zVec3 = z.array(z.coerce.number().finite()).length(3);
+/*
+ * Gemini compiles the response schema into a grammar and rejects schemas that are
+ * "too complex to serve". Numeric bounds, array length limits and long text are
+ * what blow it up, so these builders deliberately emit none of them: vectors are
+ * {x, y, z} objects (not length-3 arrays), numbers are unbounded, arrays are
+ * unbounded. Every bound is enforced after parsing instead (zod + normalizeScene).
+ */
+const str = (description?: string): J => ({ type: "string", ...(description ? { description } : {}) });
+const num = (description?: string, _minimum?: number, _maximum?: number): J => ({ type: "number", ...(description ? { description } : {}) });
+const int = (description?: string, _minimum?: number, _maximum?: number): J => ({ type: "integer", ...(description ? { description } : {}) });
+const bool = (description?: string): J => ({ type: "boolean", ...(description ? { description } : {}) });
+const vec3 = (description?: string): J => ({
+  type: "object",
+  properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
+  required: ["x", "y", "z"],
+  ...(description ? { description } : {}),
+});
+const enumOf = (values: readonly string[], description?: string): J => ({ type: "string", enum: [...values], ...(description ? { description } : {}) });
+const obj = (properties: Record<string, J>, required: string[]): J => ({ type: "object", properties, required });
+const arr = (items: J, _maxItems?: number, description?: string): J => ({ type: "array", items, ...(description ? { description } : {}) });
+
+/** A vector from the model: {x, y, z} (what the schema asks for) or [x, y, z]. Always parsed to [x, y, z]. */
+export const zVec3 = z.union([
+  z.array(z.coerce.number().finite()).length(3),
+  z.object({ x: z.coerce.number().finite(), y: z.coerce.number().finite(), z: z.coerce.number().finite() }).transform((v) => [v.x, v.y, v.z]),
+]);
 const zColor = z
   .string()
   .transform((s) => s.trim())
@@ -253,7 +260,7 @@ export const AnimationJsonSchema = obj(
           id: str("lowercase snake_case, unique"),
           assetId: str("One of the given asset ids"),
           name: str(),
-          position: vec3("[x, y, z] metres at time 0. y = 0 is the ground."),
+          position: vec3("Position in metres at time 0. y = 0 is the ground."),
           rotationY: num("Heading in degrees. 0 faces +Z, 90 faces +X."),
           scale: num("Multiplier on the asset's normal size, usually 1", 0.05, 20),
         },

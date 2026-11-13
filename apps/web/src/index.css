@@ -1,0 +1,116 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* Kivo design tokens: midnight-blue canvas, charcoal panels, violet accent. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-night-950: #070a14;
+  --color-night-900: #0a0e1a;
+  --color-night-850: #0e1322;
+  --color-night-800: #121829;
+
+  --color-panel: #161b2b;
+  --color-panel-2: #1b2133;
+  --color-panel-3: #232a3f;
+  --color-line: #262d42;
+  --color-line-2: #333b55;
+
+  --color-ink: #eef0f7;
+  --color-ink-2: #b4bad0;
+  --color-ink-3: #7f879f;
+  --color-ink-4: #5b6380;
+
+  --color-violet-300: #c4b5fd;
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b7cf6;
+  --color-violet-600: #6d5df6;
+  --color-violet-700: #5846d8;
+
+  --color-good: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+
+  --radius-xl: 0.9rem;
+  --radius-2xl: 1.15rem;
+  --radius-3xl: 1.6rem;
+
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-rise: rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-pulse-soft: pulse-soft 1.8s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-night-900 font-sans text-ink antialiased;
+    font-feature-settings: "cv11", "ss01";
+    background-image: radial-gradient(1200px 600px at 85% -10%, rgb(109 93 246 / 0.10), transparent 60%), radial-gradient(900px 500px at -10% 110%, rgb(56 96 200 / 0.08), transparent 60%);
+    background-attachment: fixed;
+  }
+  #root {
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: rgb(139 124 246 / 0.35);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-violet-400);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input[type="range"] {
+    accent-color: var(--color-violet-500);
+  }
+  /* Thin, quiet scrollbars for dense editor panels. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-2) transparent;
+  }
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-line bg-night-850 px-3 py-2 text-sm text-ink placeholder:text-ink-4 transition-colors focus:border-violet-500 focus:outline-none;
+  }
+  .field-sm {
+    @apply w-full rounded-md border border-line bg-night-850 px-2 py-1 text-xs text-ink tabular-nums transition-colors focus:border-violet-500 focus:outline-none;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium tracking-wide text-ink-3;
+  }
+  .panel {
+    @apply rounded-2xl border border-line bg-panel;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
