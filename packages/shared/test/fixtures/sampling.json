@@ -1,0 +1,2816 @@
+{
+ "spec": {
+  "version": 1,
+  "title": "Robot in the ruins",
+  "logline": "A small robot walks through an abandoned city.",
+  "style": "scifi",
+  "output": {
+   "duration": 8,
+   "fps": 24,
+   "aspect": "16:9"
+  },
+  "world": {
+   "skyTop": "#27324a",
+   "skyHorizon": "#c98a5a",
+   "groundColor": "#3a3530",
+   "ambient": 0.6,
+   "exposure": 0
+  },
+  "assets": [
+   {
+    "id": "robot",
+    "name": "Robot",
+    "kind": "character",
+    "prompt": "a cute small robot",
+    "rig": "humanoid",
+    "size": {
+     "meters": 1.2,
+     "axis": "height"
+    },
+    "actions": [
+     {
+      "name": "idle",
+      "actionId": 0
+     }
+    ],
+    "motions": []
+   },
+   {
+    "id": "tower",
+    "name": "Tower",
+    "kind": "building",
+    "prompt": "a ruined tower",
+    "rig": "none",
+    "size": {
+     "meters": 30,
+     "axis": "height"
+    },
+    "actions": [],
+    "motions": []
+   },
+   {
+    "id": "drone",
+    "name": "Drone",
+    "kind": "prop",
+    "prompt": "a hovering drone",
+    "rig": "none",
+    "size": {
+     "meters": 0.6,
+     "axis": "longest"
+    },
+    "actions": [],
+    "motions": []
+   },
+   {
+    "id": "ground",
+    "name": "Ground",
+    "kind": "terrain",
+    "prompt": "cracked asphalt ground slab",
+    "rig": "none",
+    "size": {
+     "meters": 60,
+     "axis": "width"
+    },
+    "actions": [],
+    "motions": []
+   }
+  ],
+  "objects": [
+   {
+    "id": "hero",
+    "assetId": "robot",
+    "name": "Hero",
+    "position": [
+     0,
+     0,
+     -4
+    ],
+    "rotation": [
+     0,
+     0,
+     0
+    ],
+    "scale": 1,
+    "visible": true
+   },
+   {
+    "id": "tower_a",
+    "assetId": "tower",
+    "name": "Tower A",
+    "position": [
+     -12,
+     0,
+     10
+    ],
+    "rotation": [
+     0,
+     20,
+     0
+    ],
+    "scale": 1,
+    "visible": true
+   },
+   {
+    "id": "tower_b",
+    "assetId": "tower",
+    "name": "Tower B",
+    "position": [
+     26,
+     0,
+     28
+    ],
+    "rotation": [
+     0,
+     -35,
+     0
+    ],
+    "scale": 1.3,
+    "visible": true
+   },
+   {
+    "id": "scout",
+    "assetId": "drone",
+    "name": "Scout",
+    "position": [
+     2,
+     2.5,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0
+    ],
+    "scale": 1,
+    "visible": true
+   },
+   {
+    "id": "floor",
+    "assetId": "ground",
+    "name": "Floor",
+    "position": [
+     0,
+     0,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0
+    ],
+    "scale": 1,
+    "visible": true
+   }
+  ],
+  "lights": [
+   {
+    "id": "sun",
+    "name": "Sun",
+    "type": "sun",
+    "color": "#ffd9a8",
+    "intensity": 4,
+    "position": [
+     10,
+     14,
+     -6
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "spotAngle": 45,
+    "castShadow": true
+   },
+   {
+    "id": "rim",
+    "name": "Rim",
+    "type": "point",
+    "color": "#6fa8ff",
+    "intensity": 800,
+    "position": [
+     -4,
+     3,
+     -6
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "spotAngle": 45,
+    "castShadow": false
+   }
+  ],
+  "cameras": [
+   {
+    "id": "wide",
+    "name": "Wide",
+    "attach": {
+     "mode": "world",
+     "objectId": null
+    },
+    "smooth": true,
+    "keyframes": [
+     {
+      "t": 0,
+      "position": [
+       8,
+       3,
+       -12
+      ],
+      "target": [
+       0,
+       1,
+       -2
+      ],
+      "fov": 45,
+      "easing": "ease_in_out"
+     },
+     {
+      "t": 4,
+      "position": [
+       5,
+       2.5,
+       -9
+      ],
+      "target": [
+       0,
+       1,
+       0
+      ],
+      "fov": 40,
+      "easing": "ease_in_out"
+     }
+    ]
+   },
+   {
+    "id": "chase",
+    "name": "Chase",
+    "attach": {
+     "mode": "follow",
+     "objectId": "hero"
+    },
+    "smooth": false,
+    "keyframes": [
+     {
+      "t": 4,
+      "position": [
+       -2,
+       1.4,
+       -3.5
+      ],
+      "target": [
+       0,
+       0.8,
+       1
+      ],
+      "fov": 38,
+      "easing": "linear"
+     },
+     {
+      "t": 8,
+      "position": [
+       2,
+       1.2,
+       -3
+      ],
+      "target": [
+       0,
+       0.9,
+       1
+      ],
+      "fov": 32,
+      "easing": "ease_out"
+     }
+    ]
+   },
+   {
+    "id": "track",
+    "name": "Tracking",
+    "attach": {
+     "mode": "look_at",
+     "objectId": "scout"
+    },
+    "smooth": false,
+    "keyframes": [
+     {
+      "t": 0,
+      "position": [
+       6,
+       2,
+       6
+      ],
+      "target": [
+       0,
+       0,
+       0
+      ],
+      "fov": 30,
+      "easing": "linear"
+     }
+    ]
+   }
+  ],
+  "shots": [
+   {
+    "id": "shot_1",
+    "name": "Establish",
+    "cameraId": "wide",
+    "start": 0,
+    "end": 4,
+    "transition": "fade",
+    "transitionDuration": 0.5
+   },
+   {
+    "id": "shot_2",
+    "name": "Follow",
+    "cameraId": "chase",
+    "start": 4,
+    "end": 6.5,
+    "transition": "dissolve",
+    "transitionDuration": 0.6
+   },
+   {
+    "id": "shot_3",
+    "name": "Drone",
+    "cameraId": "track",
+    "start": 6.5,
+    "end": 8,
+    "transition": "fade",
+    "transitionDuration": 0.4
+   }
+  ],
+  "tracks": [
+   {
+    "id": "hero_move",
+    "type": "transform",
+    "objectId": "hero",
+    "smooth": true,
+    "orientToPath": true,
+    "keyframes": [
+     {
+      "t": 0,
+      "position": [
+       0,
+       0,
+       -4
+      ],
+      "easing": "linear"
+     },
+     {
+      "t": 3,
+      "position": [
+       1.5,
+       0,
+       0
+      ],
+      "easing": "linear"
+     },
+     {
+      "t": 6,
+      "position": [
+       0,
+       0,
+       4
+      ],
+      "easing": "ease_out"
+     },
+     {
+      "t": 8,
+      "position": [
+       0,
+       0,
+       4
+      ],
+      "easing": "linear"
+     }
+    ]
+   },
+   {
+    "id": "hero_action",
+    "type": "action",
+    "objectId": "hero",
+    "clips": [
+     {
+      "start": 0,
+      "end": 6,
+      "action": "walk",
+      "speed": 1,
+      "loop": true
+     },
+     {
+      "start": 6,
+      "end": 8,
+      "action": "idle",
+      "speed": 1,
+      "loop": true
+     }
+    ]
+   },
+   {
+    "id": "scout_move",
+    "type": "transform",
+    "objectId": "scout",
+    "smooth": false,
+    "orientToPath": false,
+    "keyframes": [
+     {
+      "t": 0,
+      "position": [
+       2,
+       2.5,
+       0
+      ],
+      "rotation": [
+       0,
+       0,
+       0
+      ],
+      "scale": 1,
+      "easing": "linear"
+     },
+     {
+      "t": 5,
+      "position": [
+       -3,
+       3,
+       5
+      ],
+      "rotation": [
+       0,
+       180,
+       0
+      ],
+      "scale": 1.5,
+      "easing": "ease_in_out"
+     }
+    ]
+   },
+   {
+    "id": "scout_motion",
+    "type": "procedural",
+    "objectId": "scout",
+    "motions": [
+     {
+      "start": 0,
+      "end": 8,
+      "kind": "hover",
+      "amplitude": 0.15,
+      "frequency": 0.8
+     },
+     {
+      "start": 1,
+      "end": 3,
+      "kind": "wobble",
+      "amplitude": 6,
+      "frequency": 1.5
+     },
+     {
+      "start": 2,
+      "end": 4,
+      "kind": "spin",
+      "amplitude": 0,
+      "frequency": 0.25
+     },
+     {
+      "start": 5,
+      "end": 7,
+      "kind": "pulse",
+      "amplitude": 0.1,
+      "frequency": 2
+     }
+    ]
+   },
+   {
+    "id": "tower_b_motion",
+    "type": "procedural",
+    "objectId": "tower_b",
+    "motions": [
+     {
+      "start": 3,
+      "end": 5,
+      "kind": "shake",
+      "amplitude": 0.05,
+      "frequency": 6
+     },
+     {
+      "start": 5,
+      "end": 6,
+      "kind": "hop",
+      "amplitude": 0.2,
+      "frequency": 2
+     },
+     {
+      "start": 6,
+      "end": 7,
+      "kind": "bob",
+      "amplitude": 0.3,
+      "frequency": 1
+     },
+     {
+      "start": 7,
+      "end": 8,
+      "kind": "sway",
+      "amplitude": 4,
+      "frequency": 1
+     }
+    ]
+   },
+   {
+    "id": "sun_light",
+    "type": "light",
+    "lightId": "sun",
+    "keyframes": [
+     {
+      "t": 0,
+      "intensity": 4,
+      "color": "#ffd9a8",
+      "easing": "linear"
+     },
+     {
+      "t": 8,
+      "intensity": 1.5,
+      "color": "#ff7a4a",
+      "easing": "ease_in"
+     }
+    ]
+   }
+  ]
+ },
+ "samples": [
+  {
+   "t": 0,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      -4
+     ],
+     "rotation": [
+      0,
+      22.168936867145266,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      2,
+      2.5,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      8,
+      3,
+      -12
+     ],
+     "target": [
+      0,
+      1,
+      -2
+     ],
+     "fov": 45
+    },
+    "chase": {
+     "position": [
+      -2,
+      1.4,
+      -7.5
+     ],
+     "target": [
+      0,
+      0.8,
+      -3
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      2,
+      2.5,
+      0
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 4,
+     "color": [
+      1,
+      0.8509803921568627,
+      0.6588235294117647
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "fade",
+    "level": 0
+   }
+  },
+  {
+   "t": 0.1,
+   "objects": {
+    "hero": {
+     "position": [
+      0.02825,
+      0,
+      -3.928962962962963
+     ],
+     "rotation": [
+      0,
+      22.996425840910703,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      1.996,
+      2.529305220446103,
+      0.004
+     ],
+     "rotation": [
+      0,
+      0.14400000000000002,
+      0
+     ],
+     "scale": 1.0004
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      7.998117974609375,
+      2.999686329101562,
+      -11.998117974609375
+     ],
+     "target": [
+      0,
+      1,
+      -1.9975
+     ],
+     "fov": 44.99375
+    },
+    "chase": {
+     "position": [
+      -1.97175,
+      1.4,
+      -7.428962962962963
+     ],
+     "target": [
+      0.02825,
+      0.8,
+      -2.928962962962963
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      1.996,
+      2.529305220446103,
+      0.004
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.999609375,
+     "color": [
+      1,
+      0.850922181372549,
+      0.658765931372549
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "fade",
+    "level": 0.2
+   }
+  },
+  {
+   "t": 0.5,
+   "objects": {
+    "hero": {
+     "position": [
+      0.19791666666666666,
+      0,
+      -3.5648148148148144
+     ],
+     "rotation": [
+      0,
+      26.216660777176223,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      1.9,
+      2.5981677878438707,
+      0.10000000000000002
+     ],
+     "rotation": [
+      0,
+      3.6000000000000005,
+      0
+     ],
+     "scale": 1.01
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      7.948822021484375,
+      2.9914703369140625,
+      -11.948822021484375
+     ],
+     "target": [
+      0,
+      1,
+      -1.9375
+     ],
+     "fov": 44.84375
+    },
+    "chase": {
+     "position": [
+      -1.8020833333333333,
+      1.4,
+      -7.064814814814815
+     ],
+     "target": [
+      0.19791666666666666,
+      0.8,
+      -2.5648148148148144
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      1.9,
+      2.5981677878438707,
+      0.10000000000000002
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.990234375,
+     "color": [
+      1,
+      0.8495251225490196,
+      0.6573835784313725
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 1,
+   "objects": {
+    "hero": {
+     "position": [
+      0.49999999999999994,
+      0,
+      -2.9629629629629632
+     ],
+     "rotation": [
+      0,
+      26.529185279094047,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      1.5999999999999999,
+      2.397341522555727,
+      0.4000000000000001
+     ],
+     "rotation": [
+      0,
+      14.400000000000002,
+      0
+     ],
+     "scale": 1.04
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      7.748046875,
+      2.9580078125,
+      -11.748046875
+     ],
+     "target": [
+      0,
+      1,
+      -1.75
+     ],
+     "fov": 44.375
+    },
+    "chase": {
+     "position": [
+      -1.5,
+      1.4,
+      -6.462962962962964
+     ],
+     "target": [
+      0.49999999999999994,
+      0.8,
+      -1.9629629629629632
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      1.5999999999999999,
+      2.397341522555727,
+      0.4000000000000001
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.9609375,
+     "color": [
+      1,
+      0.8451593137254901,
+      0.6530637254901961
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 1.5,
+   "objects": {
+    "hero": {
+     "position": [
+      0.84375,
+      0,
+      -2.25
+     ],
+     "rotation": [
+      0,
+      24.588442454946765,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      1.1,
+      2.732658477444273,
+      0.8999999999999999
+     ],
+     "rotation": [
+      -7.347880794884119e-16,
+      32.4,
+      -6
+     ],
+     "scale": 1.09
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      7.288909912109375,
+      2.8814849853515625,
+      -11.288909912109375
+     ],
+     "target": [
+      0,
+      1,
+      -1.4375
+     ],
+     "fov": 43.59375
+    },
+    "chase": {
+     "position": [
+      -1.15625,
+      1.4,
+      -5.75
+     ],
+     "target": [
+      0.84375,
+      0.8,
+      -1.25
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      1.1,
+      2.732658477444273,
+      0.8999999999999999
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.912109375,
+     "color": [
+      1,
+      0.8378829656862745,
+      0.6458639705882353
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 2.5,
+   "objects": {
+    "hero": {
+     "position": [
+      1.4062499999999998,
+      0,
+      -0.7129629629629626
+     ],
+     "rotation": [
+      0,
+      13.231194719422367,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -0.5,
+      2.75,
+      2.5
+     ],
+     "rotation": [
+      1.83697019872103e-15,
+      135,
+      6
+     ],
+     "scale": 1.25
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5.711090087890625,
+      2.6185150146484375,
+      -9.711090087890625
+     ],
+     "target": [
+      0,
+      1,
+      -0.5625
+     ],
+     "fov": 41.40625
+    },
+    "chase": {
+     "position": [
+      -0.5937500000000002,
+      1.4,
+      -4.212962962962963
+     ],
+     "target": [
+      1.4062499999999998,
+      0.8,
+      0.2870370370370374
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -0.5,
+      2.75,
+      2.5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.755859375,
+     "color": [
+      1,
+      0.8145986519607843,
+      0.6228247549019608
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 3,
+   "objects": {
+    "hero": {
+     "position": [
+      1.5,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      -2.2899465476113097,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -1.3999999999999995,
+      2.9281677878438708,
+      3.3999999999999995
+     ],
+     "rotation": [
+      0,
+      212.39999999999998,
+      0
+     ],
+     "scale": 1.3399999999999999
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5.251953125,
+      2.5419921875,
+      -9.251953125
+     ],
+     "target": [
+      0,
+      1,
+      -0.25
+     ],
+     "fov": 40.625
+    },
+    "chase": {
+     "position": [
+      -0.5,
+      1.4,
+      -3.5
+     ],
+     "target": [
+      1.5,
+      0.8,
+      1
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -1.3999999999999995,
+      2.9281677878438708,
+      3.3999999999999995
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.6484375,
+     "color": [
+      1,
+      0.7985906862745098,
+      0.606985294117647
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 3.7,
+   "objects": {
+    "hero": {
+     "position": [
+      1.0203805895061726,
+      0,
+      1.848647706447188
+     ],
+     "rotation": [
+      0,
+      -22.636723136647618,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      25.96731110700264,
+      -0.02448213754137827,
+      27.97055348412484
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -2.324,
+      2.8950965169252716,
+      4.324
+     ],
+     "rotation": [
+      0,
+      308.66400000000004,
+      0
+     ],
+     "scale": 1.4324
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5.017440259765625,
+      2.5029067099609374,
+      -9.017440259765626
+     ],
+     "target": [
+      0,
+      1,
+      -0.022499999999999964
+     ],
+     "fov": 40.05625
+    },
+    "chase": {
+     "position": [
+      -0.9796194104938274,
+      1.4,
+      -1.651352293552812
+     ],
+     "target": [
+      1.0203805895061726,
+      0.8,
+      2.848647706447188
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -2.324,
+      2.8950965169252716,
+      4.324
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.465234375,
+     "color": [
+      1,
+      0.7712898284313725,
+      0.5799718137254902
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_1",
+   "transition": {
+    "kind": "dissolve",
+    "fromCameraId": "wide",
+    "toCameraId": "chase",
+    "mix": 0
+   }
+  },
+  {
+   "t": 4,
+   "objects": {
+    "hero": {
+     "position": [
+      0.7283950617283951,
+      0,
+      2.4965706447187923
+     ],
+     "rotation": [
+      0,
+      -25.39100531455272,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      25.99106593872647,
+      -0.023153727778739086,
+      27.951257825648675
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -2.6000000000000005,
+      3.102658477444273,
+      4.6000000000000005
+     ],
+     "rotation": [
+      0,
+      345.6,
+      0
+     ],
+     "scale": 1.46
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      -1.2716049382716048,
+      1.4,
+      -1.0034293552812077
+     ],
+     "target": [
+      0.7283950617283951,
+      0.8,
+      3.4965706447187923
+     ],
+     "fov": 38
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -2.6000000000000005,
+      3.102658477444273,
+      4.6000000000000005
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.375,
+     "color": [
+      1,
+      0.7578431372549019,
+      0.5666666666666667
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_2",
+   "transition": {
+    "kind": "dissolve",
+    "fromCameraId": "wide",
+    "toCameraId": "chase",
+    "mix": 0.4999999999999997
+   }
+  },
+  {
+   "t": 4.2,
+   "objects": {
+    "hero": {
+     "position": [
+      0.5538239999999996,
+      0,
+      2.8549120000000006
+     ],
+     "rotation": [
+      0,
+      -26.315766739437976,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      25.986531278107414,
+      0.02411597521930263,
+      27.951588499076127
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -2.7440000000000007,
+      3.0899769864163686,
+      4.744000000000001
+     ],
+     "rotation": [
+      0,
+      350.784,
+      0
+     ],
+     "scale": 1.4744000000000002
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      -1.0561760000000002,
+      1.3804999999999998,
+      -0.5963379999999994
+     ],
+     "target": [
+      0.5538239999999996,
+      0.8097500000000001,
+      3.8549120000000006
+     ],
+     "fov": 37.415
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -2.7440000000000007,
+      3.0899769864163686,
+      4.744000000000001
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.3109375,
+     "color": [
+      1,
+      0.748296568627451,
+      0.5572205882352941
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_2",
+   "transition": {
+    "kind": "dissolve",
+    "fromCameraId": "wide",
+    "toCameraId": "chase",
+    "mix": 0.8333333333333334
+   }
+  },
+  {
+   "t": 5,
+   "objects": {
+    "hero": {
+     "position": [
+      0.11728395061728403,
+      0,
+      3.7311385459533604
+     ],
+     "rotation": [
+      0,
+      -25.377320881448487,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      3,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      -0.13271604938271597,
+      1.3125,
+      0.44988854595336036
+     ],
+     "target": [
+      0.11728395061728403,
+      0.84375,
+      4.73113854595336
+     ],
+     "fov": 35.375
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      3,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 3.0234375,
+     "color": [
+      1,
+      0.705453431372549,
+      0.5148284313725491
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_2",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 5.5,
+   "objects": {
+    "hero": {
+     "position": [
+      0.023099922839505904,
+      0,
+      3.9414008916323735
+     ],
+     "rotation": [
+      0,
+      -22.4694468812285,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      2.4492935982947065e-17,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      3.088167787843871,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      0.4605999228395059,
+      1.278125,
+      0.7460883916323735
+     ],
+     "target": [
+      0.023099922839505904,
+      0.8609375,
+      4.941400891632373
+     ],
+     "fov": 34.34375
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      3.088167787843871,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 2.818359375,
+     "color": [
+      1,
+      0.6748927696078432,
+      0.48458946078431375
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_2",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 6,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      4
+     ],
+     "rotation": [
+      0,
+      -20.64947052764502,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      2.857341522555727,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      1,
+      1.25,
+      0.875
+     ],
+     "target": [
+      0,
+      0.875,
+      5
+     ],
+     "fov": 33.5
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      2.857341522555727,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 2.59375,
+     "color": [
+      1,
+      0.6414215686274509,
+      0.4514705882352941
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_2",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 6.5,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      4
+     ],
+     "rotation": [
+      0,
+      -20.556045219583464,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0.3,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      3.142658477444273,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.4999999999999998
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      1.4375,
+      1.228125,
+      0.9296875
+     ],
+     "target": [
+      0,
+      0.8859375,
+      5
+     ],
+     "fov": 32.84375
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      3.142658477444273,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 2.349609375,
+     "color": [
+      1,
+      0.6050398284313725,
+      0.41547181372549025
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_3",
+   "transition": {
+    "kind": "fade",
+    "level": 0
+   }
+  },
+  {
+   "t": 7,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      4
+     ],
+     "rotation": [
+      0,
+      -20.556045219583464,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      2.911832212156129,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      1.75,
+      1.2125,
+      0.96875
+     ],
+     "target": [
+      0,
+      0.89375,
+      5
+     ],
+     "fov": 32.375
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      2.911832212156129,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 2.0859375,
+     "color": [
+      1,
+      0.5657475490196078,
+      0.37659313725490196
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_3",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 7.9,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      4
+     ],
+     "rotation": [
+      0,
+      -20.556045219583464,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      -0.9404564036679505
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      3.054289623147961,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      1.9975,
+      1.2001249999999999,
+      0.9996874999999998
+     ],
+     "target": [
+      0,
+      0.8999375000000001,
+      5
+     ],
+     "fov": 32.00375
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      3.054289623147961,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 1.562109375,
+     "color": [
+      1,
+      0.48768688725490195,
+      0.29935416666666664
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_3",
+   "transition": {
+    "kind": "none"
+   }
+  },
+  {
+   "t": 8,
+   "objects": {
+    "hero": {
+     "position": [
+      0,
+      0,
+      4
+     ],
+     "rotation": [
+      0,
+      -20.556045219583464,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_a": {
+     "position": [
+      -12,
+      0,
+      10
+     ],
+     "rotation": [
+      0,
+      20,
+      0
+     ],
+     "scale": 1
+    },
+    "tower_b": {
+     "position": [
+      26,
+      0,
+      28
+     ],
+     "rotation": [
+      0,
+      -35,
+      0
+     ],
+     "scale": 1.3
+    },
+    "scout": {
+     "position": [
+      -3,
+      3,
+      5
+     ],
+     "rotation": [
+      0,
+      360,
+      0
+     ],
+     "scale": 1.5
+    },
+    "floor": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": 1
+    }
+   },
+   "cameras": {
+    "wide": {
+     "position": [
+      5,
+      2.5,
+      -9
+     ],
+     "target": [
+      0,
+      1,
+      0
+     ],
+     "fov": 40
+    },
+    "chase": {
+     "position": [
+      2,
+      1.2,
+      1
+     ],
+     "target": [
+      0,
+      0.9,
+      5
+     ],
+     "fov": 32
+    },
+    "track": {
+     "position": [
+      6,
+      2,
+      6
+     ],
+     "target": [
+      -3,
+      3,
+      5
+     ],
+     "fov": 30
+    }
+   },
+   "lights": {
+    "sun": {
+     "intensity": 1.5,
+     "color": [
+      1,
+      0.47843137254901963,
+      0.2901960784313726
+     ]
+    },
+    "rim": {
+     "intensity": 800,
+     "color": [
+      0.43529411764705883,
+      0.6588235294117647,
+      1
+     ]
+    }
+   },
+   "shot": "shot_3",
+   "transition": {
+    "kind": "none"
+   }
+  }
+ ]
+}

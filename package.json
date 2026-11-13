@@ -1,0 +1,19 @@
+{
+  "name": "kivo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kivo — the AI 3D video generation studio. Imagine it. Animate it.",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev:api": "npm run dev -w @kivo/api",
+    "dev:web": "npm run dev -w @kivo/web",
+    "build": "npm run build -w @kivo/web",
+    "typecheck": "npm run typecheck -w @kivo/shared && npm run typecheck -w @kivo/api && npm run typecheck -w @kivo/web",
+    "test": "npm run test -w @kivo/shared && npm run test -w @kivo/api",
+    "test:renderer": "cd services/renderer && python -m pytest -q",
+    "db:migrate:local": "npm run db:migrate:local -w @kivo/api",
+    "db:migrate:remote": "npm run db:migrate:remote -w @kivo/api",
+    "deploy": "npm run build && npm run deploy -w @kivo/api"
+  },
+  "engines": { "node": ">=20" }
+}
