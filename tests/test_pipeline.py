@@ -76,6 +76,35 @@ def test_inkos1_train_resume_export_generate(home):
     assert (paths.run_dir("inkos1") / "eval" / "samples.png").exists()
 
 
+def test_training_continues_from_installed_weights(home):
+    """A clone that ships models/<id>/ but no runs/ carries on from the recorded epoch."""
+    import shutil
+
+    from inkos import export
+    from inkos.data import prepare
+    from inkos.engine import model_status
+    from inkos.training.tasks import get_task
+    from inkos.training.trainer import Trainer
+    cfg = load_config("inkos1")
+    prepare.prepare(cfg, workers=1, download=False)
+    _train("inkos1", until_epoch=1)
+    export.export(cfg)
+    shutil.rmtree(paths.run_dir("inkos1"))
+
+    st = model_status("inkos1")
+    assert st["training"]["status"] == "not running" and st["training"]["epochs_completed"] == 1
+    assert st["training"]["samples_seen"] == 320 and st["weights"]["source"] == "installed"
+
+    tr = Trainer(cfg, get_task(cfg), device="cpu")
+    assert not tr.resume() and tr.warm_start()
+    assert (tr.epoch, tr.step_in_epoch, tr.global_step, tr.samples_seen) == (1, 0, 20, 320)
+    before = tr.task.validate(tr.ema, tr.device, 2)["loss"]
+    assert abs(before - st["weights"]["val"]["loss"]) < 0.05        # same weights (float16 rounding only)
+    assert tr.lr_now() < 0.6 * float(cfg.train.lr)                 # fresh warm-up
+    assert tr.fit(until_epoch=2) == "paused"
+    assert _state("inkos1")["epochs_completed"] == 2 and _state("inkos1")["samples_seen"] == 640
+
+
 def test_changed_architecture_refuses_old_checkpoint(home):
     from inkos.data import prepare
     from inkos.training.tasks import get_task

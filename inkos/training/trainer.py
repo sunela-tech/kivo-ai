@@ -121,6 +121,7 @@ class Trainer:
         self.started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
         self._stop = None
         self._log_file = None
+        self._warm_from = 0           # step at which the optimiser last started cold
 
     # -- logging --------------------------------------------------------------
     def log(self, msg: str):
@@ -141,7 +142,7 @@ class Trainer:
         prog = min(1.0, self.samples_seen / horizon)
         lr = float(self.t.min_lr) + 0.5 * (float(self.t.lr) - float(self.t.min_lr)) * (1 + math.cos(math.pi * prog))
         warm = int(self.t.warmup_steps)
-        return lr * min(1.0, (self.global_step + 1) / warm) if warm > 0 else lr
+        return lr * min(1.0, (self.global_step - self._warm_from + 1) / warm) if warm > 0 else lr
 
     @torch.no_grad()
     def _ema_update(self):
@@ -210,6 +211,42 @@ class Trainer:
             self.step_in_epoch = 0
         self.log(f"resumed from {path.name}: {self.epoch} epochs completed, step {self.step_in_epoch}/"
                  f"{self.steps_per_epoch} of the next, {self.samples_seen} samples seen")
+        return True
+
+    def warm_start(self) -> bool:
+        """Continue from installed weights (models/<id>/) when there is no checkpoint.
+
+        An export holds the averaged weights and their training record but no
+        optimiser state, so the optimiser starts cold with a fresh warm-up.
+        Epoch and sample counters carry on from the record in the manifest.
+        """
+        d = paths.model_dir(self.cfg.id)
+        try:
+            man = json.loads((d / "manifest.json").read_text())
+            sd = torch.load(d / man["file"], map_location="cpu", weights_only=True)
+        except (OSError, ValueError, KeyError):
+            return False
+        if man.get("fingerprint") != self.fingerprint:
+            self.log("installed weights do not match this configuration: starting from random weights")
+            return False
+        sd = {k: (v.float() if v.is_floating_point() else v) for k, v in sd.items()}
+        self.model.load_state_dict(sd)
+        self.ema.load_state_dict(sd)
+        rec = man.get("training", {})
+        self.epoch = int(rec.get("epochs_completed", 0))
+        self.global_step = int(rec.get("global_step", 0))
+        self.train_seconds = float(rec.get("train_seconds", 0.0))
+        self.last_val = rec.get("val") or {}
+        partial = self.global_step - self.epoch * self.steps_per_epoch
+        if int(rec.get("dataset_size", -1)) == self.dataset_size and 0 <= partial < self.steps_per_epoch:
+            self.step_in_epoch = partial            # same data: carry on inside the epoch
+            self.samples_seen = int(rec.get("samples_seen", 0))
+        else:
+            self.step_in_epoch = 0                  # different data: only whole epochs count
+            self.samples_seen = self.epoch * self.dataset_size
+        self._warm_from = self.global_step
+        self.log(f"no checkpoint here: continuing from installed weights ({self.epoch} epochs completed, "
+                 f"{self.samples_seen} samples seen). The optimiser starts cold.")
         return True
 
     # -- status -----------------------------------------------------------------

@@ -66,7 +66,8 @@ def cmd_train(a):
     if a.fresh and run.exists():
         shutil.rmtree(run)
     trainer = Trainer(cfg, get_task(cfg), device=a.device, threads=a.threads)
-    trainer.resume()
+    if not trainer.resume() and not a.fresh:
+        trainer.warm_start()         # e.g. a fresh clone that ships installed weights
     status = trainer.fit(max_hours=a.max_hours, max_steps=a.max_steps, until_epoch=a.until_epoch)
     sys.exit(0 if status in ("completed", "paused", "interrupted") else 1)
 
@@ -169,7 +170,8 @@ def main(argv=None):
 
     t = sub.add_parser("train", help="train a model (resumes from the last checkpoint)")
     model_arg(t)
-    t.add_argument("--fresh", action="store_true", help="delete the existing run and start from scratch")
+    t.add_argument("--fresh", action="store_true",
+                   help="delete the existing run and start from random weights (ignores installed weights too)")
     t.add_argument("--max-hours", type=float, help="stop cleanly after this long")
     t.add_argument("--max-steps", type=int, help="stop cleanly after this many steps")
     t.add_argument("--until-epoch", type=int, help="stop when this many epochs are complete")

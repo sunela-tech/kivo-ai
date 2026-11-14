@@ -107,7 +107,16 @@ def model_status(model_id: str) -> dict:
     if st and st.get("fingerprint") != model_fingerprint(cfg):
         st = None
     running = bool(st and st.get("status") == "training" and pid_alive(st.get("pid")))
-    if st is None:
+    installed = _installed_info(model_id)
+    if st is None and installed and installed.get("fingerprint") == model_fingerprint(cfg):
+        # no run on this machine, but the installed weights carry their own training record
+        training = {"status": "not running", "epochs_completed": installed.get("epochs_completed", 0),
+                    "epoch_progress": installed.get("epoch_progress", 0.0), "global_step": installed.get("global_step", 0),
+                    "samples_seen": installed.get("samples_seen", 0), "train_seconds": installed.get("train_seconds"),
+                    "loss": None, "val": installed.get("val") or {}, "previews": [],
+                    "message": "No training run on this machine yet. These numbers are the record stored with the "
+                               "installed weights; training continues from them."}
+    elif st is None:
         training = {"status": "not started", "epochs_completed": 0, "epoch_progress": 0.0, "global_step": 0,
                     "samples_seen": 0, "loss": None, "val": {}, "previews": []}
     else:

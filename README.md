@@ -107,9 +107,14 @@ python -m inkos train --model inkos1_pro
   an epoch, and when you stop the run (Ctrl-C, `python -m inkos stop --model
   ...`, or the Stop button). Running the same command again **resumes** from
   the exact batch it stopped at.
+* If there is no checkpoint but `models/<model>/` holds installed weights (the
+  situation right after cloning this repository), training **continues from
+  those weights** and from their recorded epoch count. An export carries no
+  optimiser state, so the optimiser starts cold with a fresh warm-up.
 * `--max-hours 8`, `--max-steps N` and `--until-epoch N` stop cleanly at a
-  budget. `--fresh` discards the run and starts over. `--device cuda:1` picks
-  a device; on CUDA mixed precision is used automatically.
+  budget. `--fresh` discards the run and starts from random weights.
+  `--device cuda:1` picks a device; on CUDA mixed precision is used
+  automatically.
 * `--set key=value` overrides any config value for one run, for example
   `--set train.batch_size=64`. Changing `model.*` changes the weight shapes,
   and the trainer refuses to resume a checkpoint that no longer fits.
