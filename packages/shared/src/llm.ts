@@ -88,9 +88,37 @@ export const InterpretationJsonSchema = obj(
     setting: str("Where it takes place"),
     mood: str("Mood and lighting, e.g. 'lonely, dusk, cold blue light'"),
     action: str("What moves, and how, in order"),
+    images: arr(
+      obj(
+        {
+          index: int("Which attached image this is: 1 for the first, 2 for the second, ..."),
+          subject: str("Short name of the main thing the image shows, e.g. 'red toy robot'"),
+          usable: bool("true only if the image shows ONE clear object or character that can become a single 3D model"),
+          reason: str("If not usable: one short sentence saying why (a whole scene, several things, text, too blurry...). Otherwise empty."),
+          kind: enumOf(ASSET_KINDS, "What kind of model the subject would be. Never terrain."),
+          humanoid: bool("true only if the subject stands on two legs with two separate arms and its whole body is visible"),
+          description: str("What it looks like: shape, materials, colours, distinctive details. One or two sentences."),
+        },
+        ["index", "subject", "usable", "reason", "kind", "humanoid", "description"],
+      ),
+      8,
+      "One entry per attached image, in order. Empty when no images are attached.",
+    ),
   },
-  ["accepted", "rejectionReason", "title", "logline", "subjects", "setting", "mood", "action"],
+  ["accepted", "rejectionReason", "title", "logline", "subjects", "setting", "mood", "action", "images"],
 );
+
+export const ImageBriefSchema = z.object({
+  index: z.coerce.number().int(),
+  subject: z.string().default(""),
+  usable: z.boolean().default(false),
+  reason: z.string().default(""),
+  kind: z.enum(ASSET_KINDS).catch("prop"),
+  humanoid: z.boolean().default(false),
+  description: z.string().default(""),
+});
+/** What Gemini saw in one uploaded image. */
+export type ImageBrief = z.infer<typeof ImageBriefSchema>;
 
 export const InterpretationSchema = z.object({
   accepted: z.boolean(),
@@ -101,6 +129,7 @@ export const InterpretationSchema = z.object({
   setting: z.string().default(""),
   mood: z.string().default(""),
   action: z.string().default(""),
+  images: z.array(ImageBriefSchema).default([]),
 });
 export type Interpretation = z.infer<typeof InterpretationSchema>;
 
@@ -125,6 +154,7 @@ export const PlanJsonSchema = obj(
           name: str("Display name"),
           kind: enumOf(ASSET_KINDS),
           prompt: str("Meshy text-to-3D prompt: ONE single object, concrete shape, materials and colours. No scene, no background, no multiple objects."),
+          imageIndex: int("0 to generate this model from its prompt. N (1, 2, ...) to build it from uploaded image N instead: the model is then the thing that image shows."),
           rig: enumOf(["humanoid", "none"], "humanoid ONLY for two-legged characters with clearly separate arms and legs"),
           sizeMeters: num("Real-world size in metres along sizeAxis", 0.02, 1000),
           sizeAxis: enumOf(["height", "longest", "width"], "height for upright things, width for terrain, longest for vehicles"),
@@ -132,7 +162,7 @@ export const PlanJsonSchema = obj(
           customMotionPrompt: str("Only if no library clip fits: describe one custom body motion. Otherwise empty."),
           customMotionSeconds: num("Length of the custom motion, 2 to 10", 0, 10),
         },
-        ["id", "name", "kind", "prompt", "rig", "sizeMeters", "sizeAxis", "actionIds", "customMotionPrompt", "customMotionSeconds"],
+        ["id", "name", "kind", "prompt", "imageIndex", "rig", "sizeMeters", "sizeAxis", "actionIds", "customMotionPrompt", "customMotionSeconds"],
       ),
     ),
     beats: arr(
@@ -158,6 +188,7 @@ export const PlanSchema = z.object({
         name: z.string(),
         kind: z.enum(ASSET_KINDS),
         prompt: z.string().min(3),
+        imageIndex: z.coerce.number().int().catch(0).default(0),
         rig: z.enum(["humanoid", "none"]),
         sizeMeters: z.coerce.number().positive(),
         sizeAxis: z.enum(["height", "longest", "width"]),
@@ -190,19 +221,58 @@ export function planToAssets(
   limits: Pick<PlanLimits, "maxAssetsPerScene" | "maxCustomMotions">,
   style: string,
   library: LibraryAction[],
-): { assets: SceneAsset[]; world: World; notes: string[] } {
+  images: ImageBrief[] = [],
+): { assets: SceneAsset[]; world: World; notes: string[]; imageOf: Record<string, number> } {
   const notes: string[] = [];
   const libraryById = new Map(library.map((a) => [a.action_id, a]));
   const used = new Set<string>();
   let motionsLeft = limits.maxCustomMotions;
   const hint = styleHint(style);
 
-  let planned = plan.assets;
+  // ── uploaded images: each usable one becomes exactly one model ──
+  const usable = new Map(images.filter((i) => i.usable && i.index >= 1).map((i) => [i.index, i]));
+  for (const image of images) {
+    if (!image.usable) notes.push(`Image ${image.index} was not turned into a 3D model: ${image.reason.trim() || "it does not show one clear object."}`);
+  }
+  const taken = new Set<number>();
+  let planned = plan.assets.map((a) => {
+    const wanted = a.imageIndex;
+    if (wanted <= 0) return { ...a, imageIndex: 0 };
+    if (!usable.has(wanted) || taken.has(wanted) || a.kind === "terrain") return { ...a, imageIndex: 0 };
+    taken.add(wanted);
+    return a;
+  });
+  // An image the plan forgot still appears in the video: add its model.
+  const idle = library.find((a) => a.action_id === 0) ? [0] : [];
+  for (const [index, image] of usable) {
+    if (taken.has(index)) continue;
+    const kind: AssetKind = image.kind === "terrain" ? "prop" : image.kind;
+    const upright = ["character", "creature", "building", "vegetation"].includes(kind);
+    planned.push({
+      id: toId(image.subject, `image_${index}`),
+      name: image.subject.trim() || `Image ${index}`,
+      kind,
+      prompt: image.description.trim() || image.subject.trim() || "the object in the uploaded image",
+      imageIndex: index,
+      rig: image.humanoid && kind === "character" ? "humanoid" : "none",
+      sizeMeters: { character: 1.7, creature: 1, vehicle: 4, building: 20, prop: 1, furniture: 1.2, vegetation: 4, terrain: 1 }[kind],
+      sizeAxis: upright ? "height" : "longest",
+      actionIds: image.humanoid && kind === "character" ? idle : [],
+      customMotionPrompt: "",
+      customMotionSeconds: 0,
+    });
+    taken.add(index);
+  }
+  // Models from the user's images come first, then the ground, so the scene limit never drops them.
+  const rank = (a: (typeof planned)[number]) => (a.imageIndex > 0 ? 0 : a.kind === "terrain" ? 1 : 2);
+  if (taken.size > 0) planned = planned.map((a, i) => ({ a, i })).sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i).map((x) => x.a);
+
   if (planned.length > limits.maxAssetsPerScene) {
     notes.push(`The plan asked for ${planned.length} models; this plan allows ${limits.maxAssetsPerScene} per scene.`);
     planned = planned.slice(0, limits.maxAssetsPerScene);
   }
 
+  const imageOf: Record<string, number> = {};
   const assets: SceneAsset[] = planned.map((a, index) => {
     let id = toId(a.id || a.name, `asset_${index + 1}`);
     while (used.has(id)) id = `${id.slice(0, 44)}_${index + 1}`;
@@ -234,7 +304,9 @@ export function planToAssets(
         notes.push(`"${id}": a custom motion was requested but this plan's custom-motion allowance is used up.`);
       }
     }
-    const prompt = `${a.prompt.trim().replace(/\s+/g, " ")}. ${hint}`.slice(0, 800);
+    // A model built from an image is described, not prompted: its look comes from the image itself.
+    const prompt = (a.imageIndex > 0 ? a.prompt.trim().replace(/\s+/g, " ") : `${a.prompt.trim().replace(/\s+/g, " ")}. ${hint}`).slice(0, 800);
+    if (a.imageIndex > 0) imageOf[id] = a.imageIndex;
     return {
       id,
       name: a.name.trim().slice(0, 80) || id,
@@ -247,7 +319,7 @@ export function planToAssets(
     };
   });
 
-  return { assets, world: plan.world, notes };
+  return { assets, world: plan.world, notes, imageOf };
 }
 
 // ───────────────────────── 3. Creating animations ─────────────────────────

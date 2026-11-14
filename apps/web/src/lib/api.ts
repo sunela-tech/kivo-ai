@@ -59,6 +59,27 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   return data as T;
 }
 
+/** Upload a file as the request body (used for reference images). */
+export async function apiUpload<T>(path: string, blob: Blob, filename: string): Promise<T> {
+  const token = await sessionToken();
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: "POST",
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": blob.type || "application/octet-stream", "x-kivo-filename": encodeURIComponent(filename.slice(0, 80)) },
+      body: blob,
+    });
+  } catch {
+    throw new ApiError(0, "network", "Can't reach Kivo. Check your connection and try again.");
+  }
+  const data = (await res.json().catch(() => null)) as { error?: { code: string; message: string } & Record<string, unknown> } | null;
+  if (!res.ok) {
+    const err = data?.error;
+    throw new ApiError(res.status, err?.code ?? "internal", err?.message ?? "The upload failed. Try again.", err ?? {});
+  }
+  return data as T;
+}
+
 // ───────── shapes returned by the API ─────────
 
 export interface Plan {
@@ -136,6 +157,18 @@ export interface Project {
   updatedAt: number;
 }
 
+/** A reference image attached to a project. Each usable one becomes a 3D model in the scene. */
+export interface ProjectImage {
+  id: string;
+  name: string;
+  url: string | null;
+  contentType: string;
+  width: number;
+  height: number;
+  bytes: number;
+  createdAt: number;
+}
+
 export interface Video {
   id: string;
   projectId: string;
@@ -158,6 +191,8 @@ export interface Asset {
   name: string;
   kind: string;
   prompt: string;
+  /** Built by Meshy from an image the user uploaded, rather than from a text prompt. */
+  fromImage?: boolean;
   meshyModel: string;
   status: "ready" | "failed" | "generating";
   statusLabel: string;

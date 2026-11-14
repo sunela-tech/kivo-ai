@@ -1,5 +1,6 @@
 import { STAGES, errorMessage, stageIndex, type PlanLimits } from "@kivo/shared";
 import type { Env } from "./env";
+import type { ProjectImageRow } from "./images";
 import type { AssetRow, ClipMap } from "./pipeline/assets";
 import { assetKey } from "./pipeline/assets";
 import type { JobRow, ProjectRow } from "./pipeline/jobs";
@@ -127,8 +128,24 @@ export async function videoDto(env: Env, v: VideoRow, title = "kivo-video") {
   };
 }
 
+/** A reference image the user uploaded to a project. */
+export async function imageDto(env: Env, row: ProjectImageRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    url: await mediaUrl(env, row.storage_key),
+    contentType: row.content_type,
+    width: row.width,
+    height: row.height,
+    bytes: row.bytes,
+    createdAt: row.created_at,
+  };
+}
+
 const IN_FLIGHT_LABEL: Record<string, string> = {
   pending: "Queued",
+  image_creating: "Building from your image",
+  image: "Building from your image",
   preview_creating: "Building geometry",
   preview: "Building geometry",
   previewed: "Texturing",
@@ -170,6 +187,8 @@ export async function assetDto(env: Env, row: AssetRow, withFiles = false) {
     name: row.name,
     kind: row.kind,
     prompt: row.prompt,
+    /** true when Meshy built this model from an image the user uploaded, not from a text prompt. */
+    fromImage: !!row.source_image_key,
     meshyModel: row.ai_model,
     status: row.status === "ready" ? "ready" : row.status === "failed" ? "failed" : "generating",
     statusLabel: IN_FLIGHT_LABEL[row.status] ?? row.status,

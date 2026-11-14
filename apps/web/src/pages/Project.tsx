@@ -4,13 +4,14 @@ import { Link, useNavigate, useParams } from "react-router";
 import { JobProgress } from "../components/JobProgress";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { Badge, Button, Loading, Modal, Notice, cx } from "../components/ui";
-import { ApiError, api, timeAgo, type Job, type Project, type Video } from "../lib/api";
+import { ApiError, api, timeAgo, type Job, type Project, type ProjectImage, type Video } from "../lib/api";
 import { useJob, useSession } from "../lib/session";
 
 interface Detail {
   project: Project;
   video: Video | null;
   jobs: Job[];
+  images?: ProjectImage[];
 }
 
 export function ProjectPage() {
@@ -98,6 +99,14 @@ export function ProjectPage() {
             className="mt-1 block w-full truncate rounded-lg border border-transparent bg-transparent py-1 text-2xl font-semibold tracking-tight hover:border-line focus:border-violet-500 focus:px-2 focus:outline-none"
           />
           {project.prompt && <p className="mt-1 max-w-2xl text-sm text-ink-3">“{project.prompt}”</p>}
+          {!!detail.images?.length && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-ink-4">Made from {detail.images.length === 1 ? "this image" : "these images"}:</span>
+              {detail.images.map((image) => (
+                <img key={image.id} src={image.url ?? ""} alt={image.name || "Uploaded image"} title={image.name} className="size-12 rounded-lg border border-line bg-night-900 object-contain" />
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link to={`/editor/${project.id}`}>
@@ -108,7 +117,7 @@ export function ProjectPage() {
           <Button variant="secondary" icon={<Play className="size-4" />} disabled={!project.hasScene || working} loading={busy === "render"} onClick={() => start("render", {})}>
             Render
           </Button>
-          <Button variant="secondary" icon={<RefreshCw className="size-4" />} disabled={working || !project.prompt} loading={busy === "generate"} onClick={() => start("generate", { render: true })}>
+          <Button variant="secondary" icon={<RefreshCw className="size-4" />} disabled={working || (!project.prompt && !detail.images?.length)} loading={busy === "generate"} onClick={() => start("generate", { render: true })}>
             Regenerate
           </Button>
           <Button

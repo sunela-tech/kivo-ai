@@ -40,8 +40,8 @@ export function utcDay(date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
-export async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+export async function sha256Hex(input: string | Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", typeof input === "string" ? new TextEncoder().encode(input) : input);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 

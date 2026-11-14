@@ -52,6 +52,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   meshy_failed: "Meshy couldn't generate one of the 3D models. Your quota was not charged — try simplifying that object.",
   meshy_credits: "3D generation is paused because the service's Meshy credits are exhausted. Your quota was not charged.",
   storage_unavailable: "Video generation isn't switched on yet: this Kivo deployment has no file storage, so models and videos can't be saved. Nothing was charged.",
+  invalid_image: "That file can't be used. Upload a JPG, PNG or WebP image of up to 4 MB.",
+  too_many_images: "This project already has the most images it can use. Remove one to add another.",
   storage_full: "Kivo's file storage is full, so a new video could not be saved. Delete videos or projects you no longer need and try again. Nothing was charged.",
   storage_error: "Kivo couldn't store a file. Your quota was not charged — try again.",
   render_failed: "Blender failed while rendering. Your quota was not charged — try again; if it repeats, simplify the scene.",

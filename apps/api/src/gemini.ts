@@ -22,6 +22,8 @@ export interface GeminiRequest<T> {
   parse: z.ZodType<T>;
   temperature?: number;
   timeoutMs?: number;
+  /** Images the model should look at, in order (base64, no data-URI prefix). */
+  images?: { mimeType: string; data: string }[];
 }
 
 export interface GeminiResult<T> {
@@ -87,7 +89,7 @@ export async function geminiJson<T>(env: Env, req: GeminiRequest<T>): Promise<Ge
   }
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: req.system }] },
-    contents: [{ role: "user", parts: [{ text: req.user }] }],
+    contents: [{ role: "user", parts: [{ text: req.user }, ...(req.images ?? []).map((image) => ({ inlineData: { mimeType: image.mimeType, data: image.data } }))] }],
     generationConfig: {
       responseMimeType: "application/json",
       responseJsonSchema: req.jsonSchema,

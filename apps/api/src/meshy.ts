@@ -51,6 +51,7 @@ export class MeshyHttpError extends Error {
 
 export const TASK_PATHS = {
   text: "/v2/text-to-3d",
+  image: "/v1/image-to-3d",
   rig: "/v1/rigging",
   animation: "/v1/animations",
   motion: "/v1/text-to-motion",
@@ -124,6 +125,39 @@ export class Meshy {
         const res = await this.request<{ result: string }>("POST", TASK_PATHS.text, body(successor));
         return { id: res.result, model: successor };
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Image to 3D: geometry and textures in one task, built from the user's image.
+   * The image travels as a data URI, so nothing has to be publicly reachable.
+   */
+  async createImageModel(opts: { image: string; model: MeshyModel; polycount: number; humanoid: boolean; pbr: boolean }): Promise<{ id: string; model: MeshyModel }> {
+    const body = (model: MeshyModel, extras: boolean) => ({
+      image_url: opts.image,
+      ai_model: model,
+      should_texture: true,
+      should_remesh: true,
+      topology: "triangle",
+      target_polycount: opts.polycount,
+      target_formats: ["glb"],
+      moderation: true,
+      ...(opts.humanoid ? { pose_mode: "a-pose" } : {}),
+      // PBR maps are not offered by every texture model; they are an extra, never a requirement.
+      ...(extras && opts.pbr && model !== "meshy-6-lite" ? { enable_pbr: true } : {}),
+    });
+    const send = async (model: MeshyModel, extras: boolean) => (await this.request<{ result: string }>("POST", TASK_PATHS.image, body(model, extras), 90_000)).result;
+    try {
+      return { id: await send(opts.model, true), model: opts.model };
+    } catch (error) {
+      if (!(error instanceof MeshyHttpError) || error.status !== 400) throw error;
+      const successor = MESHY_MODEL_SUCCESSOR[opts.model];
+      if (successor && /retire|deprecat|ai_model|not (supported|available)/i.test(error.message)) {
+        log("meshy_model_fallback", { from: opts.model, to: successor, reason: error.message });
+        return { id: await send(successor, true), model: successor };
+      }
+      if (/pbr/i.test(error.message)) return { id: await send(opts.model, false), model: opts.model };
       throw error;
     }
   }

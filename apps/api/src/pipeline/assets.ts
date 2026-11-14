@@ -2,6 +2,7 @@ import { BUILTIN_CLIPS, type PlanLimits, type SceneAsset } from "@kivo/shared";
 import type { Env } from "../env";
 import { Meshy, MeshyHttpError, type MeshyTask, type TaskKind } from "../meshy";
 import { recordCost } from "../usage";
+import { toBase64 } from "../images";
 import { storage } from "../storage";
 import { PipelineError, fetchWithTimeout, log, now, parseJson, sha256Hex } from "../util";
 
@@ -9,8 +10,12 @@ import { PipelineError, fetchWithTimeout, log, now, parseJson, sha256Hex } from 
  * The life of one Meshy-generated model.
  *
  *   pending ─▶ preview ─▶ previewed ─▶ refine ─▶ stored ─┬─▶ ready            (rig: none)
- *                                                         └─▶ rigging ─▶ rigged ─▶ animating ─▶ animated
- *                                                               ─▶ motion ─▶ motioned ─▶ manimating ─▶ ready
+ *      │                                          ▲       └─▶ rigging ─▶ rigged ─▶ animating ─▶ animated
+ *      └────────────────▶ image ──────────────────┘             ─▶ motion ─▶ motioned ─▶ manimating ─▶ ready
+ *
+ * A model made from text takes two Meshy tasks (preview, then refine for textures). A model
+ * made from an uploaded image takes one (Image to 3D returns geometry and textures together);
+ * its task id is kept in `refine_task_id`, because that is the textured task rigging starts from.
  *
  * Each "create a Meshy task" step first moves the row into a `*_creating` state
  * with a compare-and-swap, so two queue deliveries (or two jobs sharing the
@@ -52,6 +57,9 @@ export interface AssetRow {
   bytes: number;
   credits: number;
   error: string | null;
+  /** Set when the model is built from an uploaded image instead of a text prompt. */
+  source_image_key: string | null;
+  source_image_type: string | null;
   created_at: number;
   updated_at: number;
   last_used_at: number;
@@ -59,7 +67,7 @@ export interface AssetRow {
 
 export type ClipMap = Record<string, { file: string; animation?: string }>;
 
-export const MODEL_STATES = ["pending", "preview_creating", "preview"];
+export const MODEL_STATES = ["pending", "preview_creating", "preview", "image_creating", "image"];
 export const TEXTURE_STATES = ["previewed", "refine_creating", "refine"];
 export const RIG_STATES = [
   "stored",
@@ -92,10 +100,15 @@ export function assetKey(userId: string, assetId: string, file: string): string 
   return `users/${userId}/assets/${assetId}/${file}`;
 }
 
-/** Assets are reused per user when the prompt, model tier and rig request are identical. */
-export async function assetCacheKey(asset: SceneAsset, model: string, polycount: number): Promise<string> {
+/**
+ * Assets are reused per user when the prompt, model tier and rig request are identical.
+ * A model built from an image is keyed by the image's content instead of a prompt, so the
+ * same picture is never paid for twice, whatever Gemini happens to call it.
+ */
+export async function assetCacheKey(asset: SceneAsset, model: string, polycount: number, imageSha256?: string): Promise<string> {
   const actions = asset.actions.map((a) => a.actionId).sort((a, b) => a - b);
   const motions = asset.motions.map((m) => `${m.prompt}|${m.duration}`);
+  if (imageSha256) return sha256Hex(JSON.stringify(["image", imageSha256, asset.kind, asset.rig, model, polycount, actions, motions]));
   const normalized = asset.prompt.toLowerCase().replace(/\s+/g, " ").trim();
   return sha256Hex(JSON.stringify([normalized, asset.texturePrompt ?? "", asset.kind, asset.rig, model, polycount, actions, motions]));
 }
@@ -270,6 +283,60 @@ async function note(ctx: AssetContext, row: AssetRow, text: string): Promise<str
   return [row.rig_note, text].filter(Boolean).join(" ");
 }
 
+/** The uploaded image a model is built from, as a data URI for Meshy. */
+async function sourceImage(ctx: AssetContext, row: AssetRow): Promise<string> {
+  let bytes: ArrayBuffer | null = null;
+  try {
+    bytes = (await (await storage(ctx.env).get(row.source_image_key!))?.arrayBuffer()) ?? null;
+  } catch (error) {
+    log("storage_get_failed", { key: row.source_image_key, error: String(error) });
+    throw new PipelineError("storage_error", `The uploaded image for "${row.name}" could not be read.`, true);
+  }
+  if (!bytes || bytes.byteLength === 0) return failAsset(ctx, row, "the uploaded image is no longer in storage");
+  return `data:${row.source_image_type ?? "image/jpeg"};base64,${toBase64(bytes)}`;
+}
+
+/**
+ * A Meshy task finished with a textured model: keep the GLB and its thumbnail, and move on to
+ * rigging. Used by both ways of making a model (text refine, and Image to 3D).
+ */
+async function storeTextured(ctx: AssetContext, row: AssetRow, task: MeshyTask, from: "refine" | "image", what: string, retexture: boolean): Promise<boolean> {
+  const url = task.model_urls?.glb;
+  if (!url) return failAsset(ctx, row, "Meshy finished without a GLB file");
+  const stored = await storeGlb(ctx, row, url, "model.glb");
+  if (retexture && stored.info.images === 0 && row.retries < 1) {
+    // Textures are missing: texture it once more rather than shipping a grey model.
+    log("meshy_missing_textures", { asset: row.id });
+    await charge(ctx, row, task, what);
+    return update(ctx.env, row, { status: "previewed", refine_task_id: null, retries: row.retries + 1 }, from);
+  }
+  let thumbnailKey: string | null = null;
+  if (task.thumbnail_url && ctx.budget.left > 0) {
+    try {
+      const png = await download(ctx, task.thumbnail_url, "a thumbnail");
+      thumbnailKey = assetKey(row.user_id, row.id, "thumb.png");
+      await store(ctx, thumbnailKey, png, "image/png");
+    } catch {
+      thumbnailKey = null; // a missing thumbnail never blocks a model
+    }
+  }
+  await charge(ctx, row, task, what);
+  return update(
+    ctx.env,
+    row,
+    {
+      status: "stored",
+      model_key: stored.key,
+      thumbnail_key: thumbnailKey,
+      bytes: stored.bytes,
+      progress: 0,
+      error: stored.info.images === 0 ? "Meshy returned this model without textures." : null,
+      rig_status: row.rig_mode === "humanoid" ? "pending" : "none",
+    },
+    from,
+  );
+}
+
 /**
  * Advance one asset by one step. Returns true if it moved (so the caller may
  * step again immediately) and false if it is waiting on Meshy.
@@ -281,6 +348,26 @@ export async function stepAsset(ctx: AssetContext, row: AssetRow): Promise<boole
   switch (row.status) {
     // ── geometry ──
     case "pending": {
+      if (row.source_image_key) {
+        // Built from the user's image: one Image to 3D task makes the geometry and the textures.
+        const image = await sourceImage(ctx, row);
+        const outcome = await create(ctx, row, "pending", "image_creating", "image", "refine_task_id", label, async () => {
+          const made = await ctx.meshy.createImageModel({
+            image,
+            model: row.ai_model as PlanLimits["meshyModel"],
+            polycount: ctx.plan.targetPolycount,
+            humanoid: row.rig_mode === "humanoid",
+            pbr: ctx.plan.texturePbr,
+          });
+          return { id: made.id, fields: { ai_model: made.model } };
+        });
+        if (typeof outcome === "object") {
+          // Meshy looked at the image and refused it (not an image it can use, or blocked by moderation).
+          if (outcome.rejected.status === 401 || outcome.rejected.status === 402) throw Meshy.toPipelineError(outcome.rejected, label);
+          return failAsset(ctx, row, `the uploaded image could not be used (${outcome.rejected.message.slice(0, 200)})`);
+        }
+        return outcome === "created";
+      }
       const outcome = await create(ctx, row, "pending", "preview_creating", "preview", "preview_task_id", label, async () => {
         const made = await ctx.meshy.createPreview({
           prompt: row.prompt,
@@ -312,6 +399,22 @@ export async function stepAsset(ctx: AssetContext, row: AssetRow): Promise<boole
       return false;
     }
 
+    case "image_creating":
+      return recover(ctx, row, "image", "pending", "image", "refine_task_id", () => true);
+    case "image": {
+      const task = await poll(ctx, "image", row.refine_task_id!);
+      if (!task) return update(ctx.env, row, { status: "pending", refine_task_id: null }, "image");
+      if (task.status === "SUCCEEDED") return storeTextured(ctx, row, task, "image", "model from image", false);
+      if (task.status === "FAILED" || task.status === "CANCELED") {
+        if (TRANSIENT.has(task.task_error?.type ?? "") && row.retries < 2) {
+          return update(ctx.env, row, { status: "pending", refine_task_id: null, retries: row.retries + 1 }, "image");
+        }
+        return failAsset(ctx, row, failureMessage(task));
+      }
+      if ((task.progress ?? 0) !== row.progress) await update(ctx.env, row, { progress: task.progress ?? 0 });
+      return false;
+    }
+
     // ── textures ──
     case "previewed": {
       const outcome = await create(ctx, row, "previewed", "refine_creating", "refine", "refine_task_id", `textures for "${row.name}"`, () =>
@@ -325,42 +428,7 @@ export async function stepAsset(ctx: AssetContext, row: AssetRow): Promise<boole
     case "refine": {
       const task = await poll(ctx, "text", row.refine_task_id!);
       if (!task) return update(ctx.env, row, { status: "previewed", refine_task_id: null }, "refine");
-      if (task.status === "SUCCEEDED") {
-        const url = task.model_urls?.glb;
-        if (!url) return failAsset(ctx, row, "Meshy finished without a GLB file");
-        const stored = await storeGlb(ctx, row, url, "model.glb");
-        if (stored.info.images === 0 && row.retries < 1) {
-          // Textures are missing: texture it once more rather than shipping a grey model.
-          log("meshy_missing_textures", { asset: row.id });
-          await charge(ctx, row, task, "textures");
-          return update(ctx.env, row, { status: "previewed", refine_task_id: null, retries: row.retries + 1 }, "refine");
-        }
-        let thumbnailKey: string | null = null;
-        if (task.thumbnail_url && ctx.budget.left > 0) {
-          try {
-            const png = await download(ctx, task.thumbnail_url, "a thumbnail");
-            thumbnailKey = assetKey(row.user_id, row.id, "thumb.png");
-            await store(ctx, thumbnailKey, png, "image/png");
-          } catch {
-            thumbnailKey = null; // a missing thumbnail never blocks a model
-          }
-        }
-        await charge(ctx, row, task, "textures");
-        return update(
-          ctx.env,
-          row,
-          {
-            status: "stored",
-            model_key: stored.key,
-            thumbnail_key: thumbnailKey,
-            bytes: stored.bytes,
-            progress: 0,
-            error: stored.info.images === 0 ? "Meshy returned this model without textures." : null,
-            rig_status: row.rig_mode === "humanoid" ? "pending" : "none",
-          },
-          "refine",
-        );
-      }
+      if (task.status === "SUCCEEDED") return storeTextured(ctx, row, task, "refine", "textures", true);
       if (task.status === "FAILED" || task.status === "CANCELED") {
         if (TRANSIENT.has(task.task_error?.type ?? "") && row.retries < 2) {
           return update(ctx.env, row, { status: "previewed", refine_task_id: null, retries: row.retries + 1 }, "refine");
@@ -597,6 +665,7 @@ export async function cancelPendingTasks(env: Env, assetIds: string[]): Promise<
     const inflight: [string, TaskKind, string | null, string][] = [
       ["preview", "text", row.preview_task_id, "pending"],
       ["refine", "text", row.refine_task_id, "previewed"],
+      ["image", "image", row.refine_task_id, "pending"],
     ];
     for (const [status, kind, taskId, back] of inflight) {
       if (row.status !== status || !taskId) continue;

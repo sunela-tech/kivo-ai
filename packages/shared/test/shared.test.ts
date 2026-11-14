@@ -13,8 +13,10 @@ import {
   clampRenderToPlan,
   dimensionsFor,
   matchClipsToMotion,
+  maxImagesFor,
   ease,
   normalizeScene,
+  PlanSchema,
   planToAssets,
   reaimEmptyShots,
   resolvePlans,
@@ -479,7 +481,7 @@ describe("gemini contracts", () => {
   });
 
   it("enforces asset and custom-motion limits and never rigs non-characters", () => {
-    const { assets, notes } = planToAssets(plan, { maxAssetsPerScene: 2, maxCustomMotions: 0 }, "scifi", library);
+    const { assets, notes } = planToAssets(PlanSchema.parse(plan), { maxAssetsPerScene: 2, maxCustomMotions: 0 }, "scifi", library);
     expect(assets.map((a) => a.id)).toEqual(["hero_robot", "car"]);
     expect(assets[0]!.actions).toEqual([{ name: "idle", actionId: 0 }, { name: "wave_hello", actionId: 41 }]);
     expect(assets[0]!.motions).toEqual([]);
@@ -492,8 +494,67 @@ describe("gemini contracts", () => {
   });
 
   it("grants a custom motion when the plan allows it", () => {
-    const { assets } = planToAssets(plan, { maxAssetsPerScene: 8, maxCustomMotions: 1 }, "cinematic", library);
+    const { assets } = planToAssets(PlanSchema.parse(plan), { maxAssetsPerScene: 8, maxCustomMotions: 1 }, "cinematic", library);
     expect(assets[0]!.motions).toEqual([{ name: "custom_motion", prompt: "does a backflip", duration: 3 }]);
+  });
+
+  describe("models from uploaded images", () => {
+    const withImages = () =>
+      PlanSchema.parse({
+        world: plan.world,
+        assets: [
+          { id: "ground", name: "Ground", kind: "terrain", prompt: "a flat square tile of grass", imageIndex: 0, rig: "none", sizeMeters: 40, sizeAxis: "width", actionIds: [], customMotionPrompt: "", customMotionSeconds: 0 },
+          { id: "tree", name: "Tree", kind: "vegetation", prompt: "an oak tree", imageIndex: 0, rig: "none", sizeMeters: 6, sizeAxis: "height", actionIds: [], customMotionPrompt: "", customMotionSeconds: 0 },
+          { id: "my_toy", name: "My toy", kind: "character", prompt: "a red toy robot with square head", imageIndex: 1, rig: "humanoid", sizeMeters: 0.4, sizeAxis: "height", actionIds: [0], customMotionPrompt: "", customMotionSeconds: 0 },
+        ],
+        beats: [],
+      });
+    const seen = [
+      { index: 1, subject: "red toy robot", usable: true, reason: "", kind: "character" as const, humanoid: true, description: "A red plastic toy robot with a square head." },
+      { index: 2, subject: "wooden chair", usable: true, reason: "", kind: "furniture" as const, humanoid: false, description: "A plain wooden chair." },
+      { index: 3, subject: "beach at sunset", usable: false, reason: "It shows a whole landscape, not one object.", kind: "prop" as const, humanoid: false, description: "" },
+    ];
+
+    it("builds the model the plan assigned to an image from that image, without a style suffix", () => {
+      const { assets, imageOf } = planToAssets(withImages(), { maxAssetsPerScene: 8, maxCustomMotions: 0 }, "scifi", library, seen.slice(0, 1));
+      expect(imageOf).toEqual({ my_toy: 1 });
+      const toy = assets.find((a) => a.id === "my_toy")!;
+      expect(toy).toMatchObject({ rig: "humanoid", prompt: "a red toy robot with square head", actions: [{ name: "idle", actionId: 0 }] });
+      expect(assets.find((a) => a.id === "tree")!.prompt).toContain("science fiction"); // prompt-made models keep the style hint
+    });
+
+    it("adds a model for a usable image the plan forgot, and explains images that cannot become models", () => {
+      const { assets, imageOf, notes } = planToAssets(withImages(), { maxAssetsPerScene: 8, maxCustomMotions: 0 }, "cinematic", library, seen);
+      expect(imageOf).toEqual({ my_toy: 1, wooden_chair: 2 });
+      expect(assets.find((a) => a.id === "wooden_chair")).toMatchObject({ kind: "furniture", rig: "none", name: "wooden chair", size: { meters: 1.2, axis: "longest" } });
+      expect(notes.join(" ")).toMatch(/Image 3 was not turned into a 3D model: It shows a whole landscape/);
+    });
+
+    it("keeps image models and the ground when the scene limit cuts the list", () => {
+      const { assets } = planToAssets(withImages(), { maxAssetsPerScene: 3, maxCustomMotions: 0 }, "cinematic", library, seen);
+      expect(assets.map((a) => a.id)).toEqual(["my_toy", "wooden_chair", "ground"]);
+    });
+
+    it("never builds two models from one image, the ground from an image, or a model from an image that does not exist", () => {
+      const twice = withImages();
+      twice.assets[0]!.imageIndex = 1; // the terrain may not come from an image
+      twice.assets[1]!.imageIndex = 1; // first claim wins
+      twice.assets[2]!.imageIndex = 7; // there is no image 7
+      const { imageOf } = planToAssets(twice, { maxAssetsPerScene: 8, maxCustomMotions: 0 }, "cinematic", library, seen.slice(0, 1));
+      expect(imageOf).toEqual({ tree: 1 });
+    });
+
+    it("ignores image numbers when nothing was uploaded, and leaves the order alone", () => {
+      const { assets, imageOf } = planToAssets(withImages(), { maxAssetsPerScene: 8, maxCustomMotions: 0 }, "cinematic", library);
+      expect(imageOf).toEqual({});
+      expect(assets.map((a) => a.id)).toEqual(["ground", "tree", "my_toy"]);
+    });
+
+    it("allows up to four images but always leaves room for the ground", () => {
+      expect(maxImagesFor({ maxAssetsPerScene: 4 })).toBe(3);
+      expect(maxImagesFor({ maxAssetsPerScene: 6 })).toBe(4);
+      expect(maxImagesFor({ maxAssetsPerScene: 12 })).toBe(4);
+    });
   });
 
   it("converts animation output into tracks", () => {

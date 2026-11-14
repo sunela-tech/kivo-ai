@@ -14,6 +14,7 @@ import {
   type AnimationPlan,
   type Cinematography,
   type DirectorResponse,
+  type ImageBrief,
   type Interpretation,
   type LibraryAction,
   type PlanLimits,
@@ -47,22 +48,48 @@ export interface GenerationSettings {
 
 // ───────────── 1. Understanding the prompt ─────────────
 
-export function interpretPrompt(env: Env, prompt: string, settings: GenerationSettings) {
+export function interpretPrompt(env: Env, prompt: string, settings: GenerationSettings, images: { mimeType: string; data: string }[] = []) {
+  const n = images.length;
+  const aboutImages =
+    n === 0
+      ? "No images are attached: return an empty images list."
+      : `IMAGES
+The user attached ${n} image${n === 1 ? "" : "s"} (image 1${n > 1 ? ` to image ${n}` : ""}, in the order given). Kivo turns an image into ONE 3D model, which only works when the image shows one clear object or character. Return exactly one entry in "images" for every attached image:
+- usable is true only when the image shows a single, whole, clearly visible object, character, creature, vehicle, building or plant. Photos, drawings, renders and logos of one thing all count.
+- usable is false for a whole scene, landscape or room; several separate subjects; a screenshot, document or mostly text; an abstract pattern; or a subject that is badly cropped or too blurry to make out. Say why in reason, in one short sentence the user will read.
+- humanoid is true only if the subject stands on two legs, has two separate arms, and its whole body from head to feet is visible.
+- description says what the subject looks like (shape, materials, colours), not what the photo looks like.
+Build the film around the usable images: their subjects are its stars, and must appear in "subjects". If there is no written idea, invent a short, fitting scene for them. An image that is not usable is still a reference for the setting, the mood and the colours.
+Also set accepted to false if an image shows sexual content, graphic violence, hateful symbols, or a child in an unsafe situation.`;
   return geminiJson<Interpretation>(env, {
     label: "interpret",
     temperature: 0.6,
-    timeoutMs: 30_000,
+    timeoutMs: n > 0 ? 50_000 : 30_000,
     jsonSchema: InterpretationJsonSchema,
     parse: InterpretationSchema,
-    system: `You are the director of Kivo, a studio that turns a written idea into a short animated 3D video.
+    images,
+    system: `You are the director of Kivo, a studio that turns a written idea${n > 0 ? " and reference images" : ""} into a short animated 3D video.
 Read the user's idea and describe the film you will make from it.
+
+${aboutImages}
 
 Accept anything that can be staged with 3D models, movement, cameras and light. If the idea is vague, make confident, tasteful creative choices — do not reject for vagueness.
 Set accepted to false ONLY when the text is empty or meaningless, or asks for sexual content, real-person likenesses in harmful situations, hateful content, or gratuitous gore. In that case give a short, kind rejectionReason that suggests what to try instead.
 
 The video is ${settings.duration} seconds long, ${settings.aspect}, in a "${settings.style}" look (${styleHint(settings.style)}). Scope the story so it fits that length: one clear action, not a saga.`,
-    user: `Idea:\n"""${prompt}"""`,
+    user: `Idea:\n"""${prompt || "(nothing written: make the film from the attached images)"}"""${n > 0 ? `\n\nAttached images: ${n}.` : ""}`,
   });
+}
+
+/** What the plan is told about the uploaded images. */
+function imageNotes(images: ImageBrief[]): string {
+  return images
+    .map((i) =>
+      i.usable
+        ? `- Image ${i.index}: ${i.subject} — ${i.description} (kind: ${i.kind}; humanoid: ${i.humanoid ? "yes" : "no"}). MUST be a model with imageIndex ${i.index}.`
+        : `- Image ${i.index}: not usable as a model (${i.reason || "it does not show one clear object"}). Use it only as a reference for the setting and colours.`,
+    )
+    .join("\n");
 }
 
 // ───────────── 2. Planning the scene ─────────────
@@ -83,7 +110,9 @@ export function planScene(
   settings: GenerationSettings,
   limits: Pick<PlanLimits, "maxAssetsPerScene" | "maxCustomMotions">,
   library: LibraryAction[],
+  images: ImageBrief[] = [],
 ) {
+  const fromImages = images.some((i) => i.usable);
   return geminiJson<ScenePlan>(env, {
     label: "plan",
     temperature: 0.7,
@@ -102,6 +131,17 @@ MODELS
 - Always include exactly one model of kind "terrain": the ground the action happens on. Prompt it as ONE solid, unbroken, perfectly flat square tile seen from above, e.g. "a solid flat square floor tile of dry desert ground, unbroken surface, even thickness, nothing on it". Put surface character in the look (painted cracks, moss stains, road markings), never in the shape — no holes, gaps, chunks or raised pieces. Use sizeAxis "width" and make it wide enough for all movement plus a margin (typically 30–80 m).
 - sizeMeters is the real-world size: a person 1.7, a small robot 1.0, a car 4.5 (sizeAxis "longest"), a tree 6, a building 20–60 (sizeAxis "height").
 
+${
+  fromImages
+    ? `MODELS FROM THE USER'S IMAGES
+- The user uploaded pictures of things they want in the video (listed below). Each usable image becomes exactly one model: give that model imageIndex = the image's number. Meshy builds it from the picture itself, so write its prompt as a plain description of what the picture shows, and do not restyle or redesign it.
+- Give it the right kind, and a believable real-world sizeMeters and sizeAxis for the story (a toy can be toy-sized or life-sized, whichever serves the idea).
+- For these models, use rig "humanoid" exactly when the note says humanoid: yes. Do not add the A-pose sentence to their prompt.
+- Never build the terrain from an image. Every model that does not come from an image has imageIndex 0.
+- They count toward the limit of ${limits.maxAssetsPerScene} models. Still include the terrain, then add supporting models with whatever budget is left.
+`
+    : "- Set imageIndex to 0 for every model.\n"
+}
 CHARACTERS AND MOTION
 - rig "humanoid" is ONLY for characters that stand on two legs with two clearly separate arms (people, humanoid robots, bipedal creatures). Their prompt must end with "full body, standing in an A-pose with arms away from the body and legs apart" so the skeleton fits.
 - THE HERO MUST BE A HUMANOID whenever the idea allows it. Skeletal animation (real walking, running, waving) looks far better than sliding a rigid model. If the idea says "a robot", "a creature", "an alien", "a monster", "a toy", "a mascot" or anything else whose body is not specified, you MUST design the hero as a two-legged, two-armed humanoid with rig "humanoid" — for example a small bipedal robot with a round head, two arms and two legs. Do NOT design wheeled, spherical, hovering or legless heroes unless the idea explicitly asks for that body (a car, a drone, a ball, a fish, a four-legged animal).
@@ -121,8 +161,8 @@ BEATS
 
 ANIMATION LIBRARY (id:name)
 ${libraryText(library)}`,
-    user: `Idea: """${prompt}"""
-
+    user: `Idea: """${prompt || "(nothing written: the film is built from the uploaded images)"}"""
+${images.length ? `\nUploaded images:\n${imageNotes(images)}\n` : ""}
 Director's reading:
 - Title: ${interpretation.title}
 - Logline: ${interpretation.logline}

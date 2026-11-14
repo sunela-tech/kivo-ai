@@ -103,6 +103,7 @@ export function AssetsPage() {
                       {a.prompt}
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {a.fromImage && <Badge tone="violet">From your image</Badge>}
                       {(a.rigRequested || a.rigStatus !== "none") && (
                         <Badge tone={rig.tone}>
                           <Bone className="size-3" /> {rig.text}

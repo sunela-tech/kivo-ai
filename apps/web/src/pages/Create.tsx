@@ -1,12 +1,14 @@
-import { ASPECTS, RESOLUTIONS, resolutionRank, type Aspect, type Resolution } from "@kivo/shared";
+import { ASPECTS, RESOLUTIONS, maxImagesFor, resolutionRank, type Aspect, type Resolution } from "@kivo/shared";
 import { ArrowRight, Box, Lock, Sparkles, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { ImagePicker, type AttachedImage } from "../components/ImagePicker";
 import { JobProgress } from "../components/JobProgress";
 import { Onboarding } from "../components/Onboarding";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { Button, Loading, Notice, Segmented, cx } from "../components/ui";
-import { ApiError, api, type Job, type Project, type Video } from "../lib/api";
+import { ApiError, api, apiUpload, type Job, type Project, type ProjectImage, type Video } from "../lib/api";
+import { prepareImage } from "../lib/images";
 import { useJob, useSession } from "../lib/session";
 
 const DURATIONS = [3, 5, 8, 10, 15, 20, 30, 45, 60, 90, 120, 180];
@@ -37,6 +39,11 @@ export function CreatePage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [images, setImages] = useState<AttachedImage[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  /** True while this page is itself uploading images, so a reload of the project does not replace them halfway. */
+  const uploading = useRef(false);
+  const stored = (list: ProjectImage[]): AttachedImage[] => list.map((i) => ({ key: i.id, id: i.id, name: i.name, preview: i.url ?? "" }));
 
   const plan = me?.plan;
   const showWelcome = !!me && !me.user.onboarded;
@@ -53,9 +60,10 @@ export function CreatePage() {
     if (!projectId) return;
     let live = true;
     setLoadingProject(true);
-    api<{ project: Project; video: Video | null; jobs: Job[] }>(`/projects/${projectId}`)
+    api<{ project: Project; video: Video | null; jobs: Job[]; images: ProjectImage[] }>(`/projects/${projectId}`)
       .then((d) => {
         if (!live) return;
+        if (!uploading.current) setImages(stored(d.images ?? []));
         setProject(d.project);
         setPrompt(d.project.prompt);
         setStyle(d.project.style);
@@ -102,17 +110,82 @@ export function CreatePage() {
     return saved.project;
   };
 
+  const maxImages = plan ? maxImagesFor(plan) : 1;
+
+  /** Add pictures. On a saved project they are uploaded straight away; on a new one they wait for Generate. */
+  const addImages = async (files: File[]) => {
+    setImageError(null);
+    const room = maxImages - images.length;
+    if (files.length > room) setImageError(`You can use up to ${maxImages} image${maxImages === 1 ? "" : "s"} on the ${plan?.name ?? "current"} plan.`);
+    for (const file of files.slice(0, Math.max(0, room))) {
+      try {
+        const prepared = await prepareImage(file);
+        const key = crypto.randomUUID();
+        const local: AttachedImage = { key, name: prepared.name, preview: URL.createObjectURL(prepared.blob), blob: prepared.blob, busy: !!project };
+        setImages((list) => [...list, local]);
+        if (project) {
+          uploading.current = true;
+          try {
+            const res = await apiUpload<{ images: ProjectImage[] }>(`/projects/${project.id}/images`, prepared.blob, prepared.name);
+            URL.revokeObjectURL(local.preview);
+            setImages(stored(res.images));
+          } catch (e) {
+            setImages((list) => list.filter((i) => i.key !== key));
+            setImageError((e as Error).message);
+          } finally {
+            uploading.current = false;
+          }
+        }
+      } catch (e) {
+        setImageError((e as Error).message);
+      }
+    }
+  };
+
+  const removeImage = async (image: AttachedImage) => {
+    setImageError(null);
+    if (!image.id || !project) {
+      if (image.blob) URL.revokeObjectURL(image.preview);
+      setImages((list) => list.filter((i) => i.key !== image.key));
+      return;
+    }
+    try {
+      const res = await api<{ images: ProjectImage[] }>(`/projects/${project.id}/images/${image.id}`, { method: "DELETE" });
+      setImages(stored(res.images));
+    } catch (e) {
+      setImageError((e as Error).message);
+    }
+  };
+
   const generate = async (render: boolean) => {
     setBusy(true);
     setError(null);
+    setImageError(null);
     try {
       const p = await save();
+      // Pictures added before the project existed are uploaded now, in the order they were added.
+      const pending = images.filter((i) => !i.id && i.blob);
+      if (pending.length) {
+        uploading.current = true;
+        try {
+          let latest: ProjectImage[] = [];
+          for (const image of pending) {
+            setImages((list) => list.map((i) => (i.key === image.key ? { ...i, busy: true } : i)));
+            latest = (await apiUpload<{ images: ProjectImage[] }>(`/projects/${p.id}/images`, image.blob!, image.name)).images;
+          }
+          for (const image of pending) URL.revokeObjectURL(image.preview);
+          setImages(stored(latest));
+        } finally {
+          uploading.current = false;
+        }
+      }
       const started = await api<{ job: Job }>(`/projects/${p.id}/generate`, { body: { render } });
       setVideo(null);
       setJobId(started.job.id);
       await refresh();
     } catch (e) {
       setError(e as ApiError);
+      setImages((list) => list.map((i) => ({ ...i, busy: false })));
     } finally {
       setBusy(false);
     }
@@ -122,7 +195,8 @@ export function CreatePage() {
   if (!me || !plan) return <Loading />;
   if (loadingProject) return <Loading label="Opening project" />;
 
-  const canGenerate = prompt.trim().length >= 3 && !busy && !working && !outOfQuota && !atConcurrency && config.storageReady;
+  // An idea in words, one or more images, or both.
+  const canGenerate = (prompt.trim().length >= 3 || images.length > 0) && !images.some((i) => i.busy) && !busy && !working && !outOfQuota && !atConcurrency && config.storageReady;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -138,7 +212,7 @@ export function CreatePage() {
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{project ? project.title : "Create a video"}</h1>
-          <p className="mt-1.5 text-sm text-ink-3">{mode === "simple" ? "Describe your idea. Kivo handles everything else." : "Generate an editable 3D scene, then direct it yourself."}</p>
+          <p className="mt-1.5 text-sm text-ink-3">{mode === "simple" ? "Describe your idea, add images, or both. Kivo handles everything else." : "Generate an editable 3D scene, then direct it yourself."}</p>
         </div>
         <Segmented<Mode>
           label="Creation mode"
@@ -162,10 +236,10 @@ export function CreatePage() {
           disabled={working}
           maxLength={2000}
           rows={mode === "simple" ? 5 : 3}
-          placeholder="A cute robot explores an abandoned futuristic city while the camera follows it."
+          placeholder={images.length ? "Optional: say what should happen with the things in your images." : "A cute robot explores an abandoned futuristic city while the camera follows it."}
           className="field resize-none text-base leading-relaxed"
         />
-        {!prompt && !project && (
+        {!prompt && !project && images.length === 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {EXAMPLES.slice(1).map((e) => (
               <button key={e} onClick={() => setPrompt(e)} className="rounded-full border border-line bg-night-850 px-3 py-1.5 text-left text-xs text-ink-3 transition-colors hover:border-line-2 hover:text-ink">
@@ -173,6 +247,13 @@ export function CreatePage() {
               </button>
             ))}
           </div>
+        )}
+
+        <ImagePicker images={images} max={maxImages} disabled={working || busy} onAdd={(files) => void addImages(files)} onRemove={(image) => void removeImage(image)} />
+        {imageError && (
+          <p role="alert" className="mt-2 text-xs text-bad">
+            {imageError}
+          </p>
         )}
 
         <div className="mt-6 grid gap-5 sm:grid-cols-2">

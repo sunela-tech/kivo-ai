@@ -14,9 +14,9 @@ A generation is a row in `jobs` advanced by queue messages. Each delivery takes 
 
 | # | Stage shown to the user | What actually happens |
 |---|---|---|
-| 1 | Understanding prompt | Gemini reads the idea and returns a brief (or a polite rejection) |
+| 1 | Understanding prompt | Gemini reads the idea — and looks at any uploaded images — and returns a brief (or a polite rejection) |
 | 2 | Planning 3D scene | Gemini chooses the models and the world; cost ceilings are checked; asset rows are created or reused |
-| 3 | Generating models with Meshy | Text to 3D *preview* tasks; progress is the mean of Meshy's own task progress |
+| 3 | Generating models with Meshy | Text to 3D *preview* tasks, and one *Image to 3D* task per model built from an uploaded image; progress is the mean of Meshy's own task progress |
 | 4 | Preparing textures | Text to 3D *refine* tasks; GLBs and thumbnails are copied into file storage (R2, or Workers KV when R2 is off) |
 | 5 | Rigging characters | Meshy rigging for humanoids, then library clips (and optional Text to Motion) |
 | 6 | Creating animations | Gemini places objects and choreographs them, knowing which clips really exist |
@@ -34,6 +34,18 @@ Stages 9–11 are driven by the render service's reports (`/api/render/*`), not 
 `apps/api/src/pipeline/assets.ts` is a small state machine per model. Every "create a Meshy task" step first moves the row into a `*_creating` state with a compare-and-swap, so duplicate queue deliveries — or two jobs sharing a model — cannot create and pay for the same task twice. Meshy has no idempotency key, so if a create response is lost the row waits a minute, lists Meshy's newest tasks, and adopts the orphan instead of creating another.
 
 Models are reused per user when the prompt, plan model and rig request are identical; a reused model costs nothing. Assets are stored under `users/<userId>/assets/<assetId>/`.
+
+### Models from uploaded images
+
+A project can carry up to four reference images (three on Free: one model slot is always kept for the ground). They are uploaded as the request body of `POST /api/projects/:id/images`, checked by their bytes (JPEG, PNG or WebP only; real pixel size read from the header; at most 4 MB after the browser has scaled them to 1536 px), stored privately under `users/<user>/uploads/<project>/`, and listed in `project_images`.
+
+When a generation starts, the project's images are snapshotted into the job:
+
+1. **Understanding prompt.** Gemini is sent the images themselves, once. For each it reports the subject, whether it is *usable* (one clear object or character — not a scene, a group, or a screenshot), whether it is a humanoid, and a description. A written idea is optional when there is at least one image.
+2. **Planning.** Gemini is given those notes as text. Every usable image must become exactly one model (`imageIndex` on the plan's asset). `planToAssets` enforces it: an image is never used twice or for the terrain, a usable image the plan forgot gets its model added, and image models survive the scene limit ahead of everything but the ground. Images that are not usable are reported to the user as warnings, with Gemini's reason.
+3. **Models.** A model with a source image takes one Meshy **Image to 3D** task (geometry and textures together, the image sent as a data URI, `moderation` on, `pose_mode: a-pose` for humanoids) instead of the preview/refine pair. From there it is the same asset as any other: stored, rigged if humanoid, given clips. It is cached by the image's SHA-256, so the same picture is never paid for twice.
+
+Image to 3D costs 15 Meshy credits with Meshy 6 Lite and 30 with the other models; the estimate and the cost ceilings use those figures.
 
 ### Rigging, honestly
 

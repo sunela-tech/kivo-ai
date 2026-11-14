@@ -4,7 +4,7 @@ import { Logo } from "../components/ui";
 import type { AppConfig } from "../lib/api";
 
 const STEPS = [
-  { icon: Sparkles, title: "Write an idea", text: "One sentence is enough." },
+  { icon: Sparkles, title: "Write an idea", text: "One sentence is enough. Or add your own images." },
   { icon: Box, title: "Meshy builds the models", text: "Every character, prop and set piece." },
   { icon: Wand2, title: "Gemini directs", text: "Movement, cameras, light and the edit." },
   { icon: Camera, title: "Blender renders", text: "Real frames, encoded to MP4." },

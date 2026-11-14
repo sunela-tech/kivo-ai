@@ -6,7 +6,9 @@ import {
   SceneValidationError,
   VISUAL_STYLE_IDS,
   applyDirectorOps,
+  IMAGE_UPLOAD,
   errorMessage,
+  maxImagesFor,
   normalizeScene,
   resolutionRank,
   type PlanLimits,
@@ -15,16 +17,17 @@ import {
 } from "@kivo/shared";
 import { requireUser } from "../auth";
 import { directScene } from "../director";
-import { assetDto, jobDto, projectDto, videoDto, type VideoRow } from "../dto";
+import { assetDto, imageDto, jobDto, projectDto, videoDto, type VideoRow } from "../dto";
 import type { AppBindings, Env } from "../env";
+import { imageProblem, sniffImage, uploadKey, type ProjectImageRow } from "../images";
 import { animationLibrary } from "../meshy";
 import { clipNames, type AssetRow } from "../pipeline/assets";
 import { loadProject, loadScene, saveScene, type JobRow, type ProjectRow } from "../pipeline/jobs";
-import { enqueue, provisionAssets, type JobState } from "../pipeline/run";
+import { enqueue, provisionAssets, type JobImage, type JobState } from "../pipeline/run";
 import { rateLimit } from "../ratelimit";
 import { reserveVideo, usageSummary, recordCost } from "../usage";
 import { findStorage, requireStorageRoom, storage } from "../storage";
-import { HttpError, PipelineError, newId, now } from "../util";
+import { HttpError, PipelineError, newId, now, sha256Hex } from "../util";
 
 export const projects = new Hono<AppBindings>();
 projects.use("*", requireUser);
@@ -117,7 +120,96 @@ projects.get("/:id", async (c) => {
     project: await projectDto(c.env, project),
     video: video ? await videoDto(c.env, video, project.title) : null,
     jobs: jobs.results.map(jobDto),
+    images: await imageDtos(c.env, project.id),
   });
+});
+
+// ───────────── reference images ─────────────
+
+async function projectImages(env: Env, projectId: string): Promise<ProjectImageRow[]> {
+  const { results } = await env.DB.prepare("SELECT * FROM project_images WHERE project_id = ? ORDER BY created_at, id").bind(projectId).all<ProjectImageRow>();
+  return results;
+}
+
+async function imageDtos(env: Env, projectId: string) {
+  return Promise.all((await projectImages(env, projectId)).map((row) => imageDto(env, row)));
+}
+
+projects.get("/:id/images", async (c) => {
+  const project = await ownProject(c.env, c.get("user").id, c.req.param("id"));
+  return c.json({ images: await imageDtos(c.env, project.id), max: maxImagesFor(c.get("plan")) });
+});
+
+/**
+ * Attach an image to a project. The body is the image file itself. Each usable image later
+ * becomes one 3D model, so the number of images is tied to the plan's models-per-scene limit.
+ */
+projects.post("/:id/images", async (c) => {
+  const user = c.get("user");
+  const plan = c.get("plan");
+  const project = await ownProject(c.env, user.id, c.req.param("id"));
+  await rateLimit(c.env, `images:${user.id}`, 40, 60);
+  const store = await requireStorageRoom(c.env);
+
+  const tooBig = () => new HttpError(413, "invalid_image", `The image is larger than ${Math.round(IMAGE_UPLOAD.maxBytes / (1024 * 1024))} MB.`);
+  if (Number(c.req.header("content-length") ?? "0") > IMAGE_UPLOAD.maxBytes) throw tooBig();
+  const limit = maxImagesFor(plan);
+  const tooMany = () => new HttpError(409, "too_many_images", `A project can use up to ${limit} image${limit === 1 ? "" : "s"} on the ${plan.name} plan. Remove one to add another.`);
+  const existing = await projectImages(c.env, project.id);
+
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength > IMAGE_UPLOAD.maxBytes) throw tooBig();
+  const sniffed = sniffImage(bytes);
+  const problem = imageProblem(bytes, sniffed);
+  if (problem || !sniffed) throw new HttpError(400, "invalid_image", problem ?? "The file is not a JPG, PNG or WebP image.");
+
+  // The same picture twice is the same image, not a second model.
+  const sha256 = await sha256Hex(bytes);
+  const same = existing.find((row) => row.sha256 === sha256);
+  if (same) return c.json({ image: await imageDto(c.env, same), images: await imageDtos(c.env, project.id), duplicate: true });
+  if (existing.length >= limit) throw tooMany();
+
+  let name = "";
+  try {
+    name = decodeURIComponent(c.req.header("x-kivo-filename") ?? "");
+  } catch {
+    /* a bad header is just no name */
+  }
+  name = name.replace(/[\u0000-\u001f\u007f<>]/g, "").trim().slice(0, 80);
+
+  const id = newId("img");
+  const key = uploadKey(user.id, project.id, id, sniffed.type);
+  try {
+    await store.put(key, bytes, { contentType: sniffed.type });
+  } catch {
+    throw new HttpError(507, "storage_error");
+  }
+  // The limit is enforced again in the insert itself, so two uploads at once cannot both slip under it.
+  const inserted = await c.env.DB.prepare(
+    `INSERT INTO project_images (id, project_id, user_id, storage_key, content_type, bytes, width, height, sha256, name, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (SELECT COUNT(*) FROM project_images WHERE project_id = ?) < ?`,
+  )
+    .bind(id, project.id, user.id, key, sniffed.type, bytes.byteLength, sniffed.width, sniffed.height, sha256, name, now(), project.id, limit)
+    .run();
+  if (inserted.meta.changes === 0) {
+    await store.delete(key).catch(() => undefined);
+    throw tooMany();
+  }
+  const row = (await c.env.DB.prepare("SELECT * FROM project_images WHERE id = ?").bind(id).first<ProjectImageRow>())!;
+  return c.json({ image: await imageDto(c.env, row), images: await imageDtos(c.env, project.id), duplicate: false }, 201);
+});
+
+projects.delete("/:id/images/:imageId", async (c) => {
+  const user = c.get("user");
+  const project = await ownProject(c.env, user.id, c.req.param("id"));
+  const row = await c.env.DB.prepare("SELECT * FROM project_images WHERE id = ? AND project_id = ? AND user_id = ?").bind(c.req.param("imageId"), project.id, user.id).first<ProjectImageRow>();
+  if (!row) throw new HttpError(404, "internal", "Image not found.");
+  const busy = await c.env.DB.prepare("SELECT 1 AS x FROM jobs WHERE project_id = ? AND kind = 'generate' AND status IN ('queued', 'running') LIMIT 1").bind(project.id).first();
+  if (busy) throw new HttpError(409, "internal", "A video is being generated from this project's images. Wait for it to finish, or cancel it, before removing one.");
+  await findStorage(c.env)?.delete(row.storage_key);
+  await c.env.DB.prepare("DELETE FROM project_images WHERE id = ?").bind(row.id).run();
+  return c.json({ deleted: true, images: await imageDtos(c.env, project.id) });
 });
 
 projects.patch("/:id", async (c) => {
@@ -150,6 +242,7 @@ export async function deleteProject(env: Env, project: ProjectRow): Promise<void
   if (store) {
     if (keys.length) await store.delete(keys);
     for (const asset of orphans.results) await store.deletePrefix(`users/${asset.user_id}/assets/${asset.id}/`);
+    await store.deletePrefix(`users/${project.user_id}/uploads/${project.id}/`);
   }
 
   const statements = [
@@ -157,6 +250,7 @@ export async function deleteProject(env: Env, project: ProjectRow): Promise<void
     env.DB.prepare("DELETE FROM render_jobs WHERE project_id = ?").bind(project.id),
     env.DB.prepare("DELETE FROM scenes WHERE project_id = ?").bind(project.id),
     env.DB.prepare("DELETE FROM project_assets WHERE project_id = ?").bind(project.id),
+    env.DB.prepare("DELETE FROM project_images WHERE project_id = ?").bind(project.id),
     env.DB.prepare("DELETE FROM jobs WHERE project_id = ? AND status NOT IN ('queued', 'running')").bind(project.id),
     env.DB.prepare("DELETE FROM projects WHERE id = ?").bind(project.id),
   ];
@@ -249,7 +343,12 @@ projects.post("/:id/generate", async (c) => {
   const project = await ownProject(c.env, user.id, c.req.param("id"));
   const input = await body(c, GenerateInput);
   await rateLimit(c.env, `generate:${user.id}`, 10, 60);
-  if (project.prompt.trim().length < 3) throw new HttpError(400, "invalid_prompt");
+  // Uploaded images are snapshotted into the job, so later uploads or removals never change a running generation.
+  const images: JobImage[] = (await projectImages(c.env, project.id))
+    .slice(0, maxImagesFor(plan))
+    .map((row) => ({ id: row.id, key: row.storage_key, type: row.content_type, sha256: row.sha256, name: row.name }));
+  // An idea in words, one or more images, or both.
+  if (project.prompt.trim().length < 3 && images.length === 0) throw new HttpError(400, "invalid_prompt");
 
   // Plan limits are applied here, on the server, to whatever the client asked for.
   const duration = Math.min(project.duration, plan.maxDurationSec);
@@ -259,7 +358,7 @@ projects.post("/:id/generate", async (c) => {
   const job = await startJob(c.env, user.id, plan, project, {
     kind: "generate",
     stage: "understanding_prompt",
-    params: { prompt: project.prompt, style: project.style, duration, fps, aspect: project.aspect, resolution, render: input.render },
+    params: { prompt: project.prompt, style: project.style, duration, fps, aspect: project.aspect, resolution, render: input.render, images },
     charge: "video",
   });
   await c.env.DB.prepare("UPDATE projects SET status = 'generating', updated_at = ? WHERE id = ?").bind(now(), project.id).run();

@@ -266,7 +266,27 @@ export function usagePeriod(date: Date = new Date()): string {
 export const MESHY_CREDITS = {
   preview: { "meshy-6-lite": 5, "meshy-6": 20, "meshy-7": 20, "meshy-7.1": 20 } as Record<MeshyModel, number>,
   refine: 10,
+  /** Image to 3D with 2K textures: geometry and texture in one task. */
+  imageTo3d: { "meshy-6-lite": 15, "meshy-6": 30, "meshy-7": 30, "meshy-7.1": 30 } as Record<MeshyModel, number>,
   rig: 5,
   animationAction: 3,
   textToMotionPrime: 10,
 } as const;
+
+/**
+ * Reference images a user may attach to a project. Each usable image becomes one 3D model
+ * (Meshy Image to 3D), so images count against the scene's model limit; one slot is always
+ * kept for the ground.
+ */
+export const IMAGE_UPLOAD = {
+  maxPerProject: 4,
+  maxBytes: 4 * 1024 * 1024,
+  minSide: 64,
+  maxSide: 8192,
+  types: ["image/jpeg", "image/png", "image/webp"] as const,
+} as const;
+export type ImageType = (typeof IMAGE_UPLOAD.types)[number];
+
+export function maxImagesFor(plan: Pick<PlanLimits, "maxAssetsPerScene">): number {
+  return Math.max(1, Math.min(IMAGE_UPLOAD.maxPerProject, plan.maxAssetsPerScene - 1));
+}

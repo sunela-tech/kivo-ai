@@ -10,6 +10,7 @@ import {
   planToAssets,
   toId,
   type Aspect,
+  type ImageBrief,
   type Interpretation,
   type PlanLimits,
   type Resolution,
@@ -26,6 +27,7 @@ import type { Env } from "../env";
 import { Meshy, animationLibrary } from "../meshy";
 import { getPlans } from "../plans";
 import { globalMeshyCeiling, meshySpend, recordCost } from "../usage";
+import { toBase64 } from "../images";
 import { storage } from "../storage";
 import { PipelineError, log, newId, now, parseJson } from "../util";
 import { assetCacheKey, cancelPendingTasks, clipNames, loadAssets, tickAssets, type AssetRow } from "./assets";
@@ -50,6 +52,17 @@ export interface GenerateParams {
   resolution: Resolution;
   /** false = stop when the scene is ready (Advanced Mode draft). */
   render: boolean;
+  /** Reference images attached when the job started, in order: image 1, image 2, ... */
+  images?: JobImage[];
+}
+
+/** One uploaded image as a job sees it. */
+export interface JobImage {
+  id: string;
+  key: string;
+  type: string;
+  sha256: string;
+  name: string;
 }
 
 export interface RenderParams {
@@ -102,13 +115,51 @@ function settingsOf(ctx: Ctx): GenerationSettings {
 
 // ───────────── stage handlers ─────────────
 
+/** Gemini's notes about the uploaded images, tidied: exactly one entry per image, in order. */
+export function alignImageBriefs(briefs: ImageBrief[], count: number): ImageBrief[] {
+  const out: ImageBrief[] = [];
+  for (let index = 1; index <= count; index++) {
+    const brief = briefs.find((b) => b.index === index);
+    out.push(
+      brief
+        ? { ...brief, subject: brief.subject.trim().slice(0, 80), description: brief.description.trim().slice(0, 600), reason: brief.reason.trim().slice(0, 240) }
+        : { index, subject: "", usable: false, reason: "Kivo could not tell what it shows.", kind: "prop", humanoid: false, description: "" },
+    );
+  }
+  return out;
+}
+
 async function understandPrompt(ctx: Ctx): Promise<Outcome> {
   const prompt = ctx.params.prompt.trim();
-  if (prompt.length < 3) throw new PipelineError("invalid_prompt", "The prompt is empty. Describe who or what is in the scene and what happens.", false);
-  const reply = await interpretPrompt(ctx.env, prompt, settingsOf(ctx));
+  const attached = ctx.params.images ?? [];
+  if (prompt.length < 3 && attached.length === 0) throw new PipelineError("invalid_prompt", "The prompt is empty. Describe who or what is in the scene and what happens.", false);
+
+  // Gemini looks at the uploaded images themselves, once, here; later passes work from its notes.
+  const images: { mimeType: string; data: string }[] = [];
+  for (const image of attached) {
+    let bytes: ArrayBuffer | null;
+    try {
+      bytes = (await (await storage(ctx.env).get(image.key))?.arrayBuffer()) ?? null;
+    } catch {
+      throw new PipelineError("storage_error", "An uploaded image could not be read.", true);
+    }
+    if (!bytes) throw new PipelineError("invalid_prompt", `The uploaded image "${image.name || "image"}" is no longer available. Upload it again and retry.`, false);
+    images.push({ mimeType: image.type, data: toBase64(bytes) });
+  }
+
+  const reply = await interpretPrompt(ctx.env, prompt, settingsOf(ctx), images);
   await recordCost(ctx.env, ctx.job.user_id, ctx.job.id, "gemini", reply.tokens, `interpret (${reply.model})`);
   if (!reply.data.accepted) {
     throw new PipelineError("prompt_rejected", reply.data.rejectionReason.trim() || "That prompt can't be turned into a scene. Try describing a different one.", false);
+  }
+  reply.data.images = alignImageBriefs(reply.data.images, attached.length);
+  if (attached.length > 0 && prompt.length < 3 && !reply.data.images.some((i) => i.usable)) {
+    const why = reply.data.images.map((i) => `image ${i.index}: ${i.reason || "not one clear object"}`).join("; ");
+    throw new PipelineError(
+      "invalid_prompt",
+      `None of the uploaded images shows one clear object or character that can become a 3D model (${why}). Upload a picture of a single thing on a plain background, or describe the scene in words.`,
+      false,
+    );
   }
   ctx.state.interpretation = reply.data;
   await saveState(ctx);
@@ -118,8 +169,8 @@ async function understandPrompt(ctx: Ctx): Promise<Outcome> {
 }
 
 /** Credits a fresh generation of this asset will cost on Meshy. */
-export function estimateCredits(asset: SceneAsset, model: PlanLimits["meshyModel"]): number {
-  let credits = MESHY_CREDITS.preview[model] + MESHY_CREDITS.refine;
+export function estimateCredits(asset: SceneAsset, model: PlanLimits["meshyModel"], fromImage = false): number {
+  let credits = fromImage ? MESHY_CREDITS.imageTo3d[model] : MESHY_CREDITS.preview[model] + MESHY_CREDITS.refine;
   if (asset.rig === "humanoid") {
     credits += MESHY_CREDITS.rig + asset.actions.length * MESHY_CREDITS.animationAction;
     credits += asset.motions.length ? MESHY_CREDITS.textToMotionPrime + MESHY_CREDITS.animationAction : 0;
@@ -131,8 +182,18 @@ export function estimateCredits(asset: SceneAsset, model: PlanLimits["meshyModel
  * Create (or reuse) the asset rows for a list of scene assets, enforcing the
  * cost ceilings before a single Meshy credit is spent.
  */
-export async function provisionAssets(env: Env, userId: string, projectId: string, plan: PlanLimits, assets: SceneAsset[]): Promise<{ ids: Record<string, string>; estimate: number; reused: number }> {
-  const keyed = await Promise.all(assets.map(async (a) => ({ asset: a, cacheKey: await assetCacheKey(a, plan.meshyModel, plan.targetPolycount) })));
+export async function provisionAssets(
+  env: Env,
+  userId: string,
+  projectId: string,
+  plan: PlanLimits,
+  assets: SceneAsset[],
+  /** scene asset id -> the uploaded image that model is built from */
+  sources: Record<string, JobImage> = {},
+): Promise<{ ids: Record<string, string>; estimate: number; reused: number }> {
+  const keyed = await Promise.all(
+    assets.map(async (a) => ({ asset: a, source: sources[a.id] ?? null, cacheKey: await assetCacheKey(a, plan.meshyModel, plan.targetPolycount, sources[a.id]?.sha256) })),
+  );
   const existing = new Map<string, AssetRow>();
   if (keyed.length) {
     const { results } = await env.DB.prepare(`SELECT * FROM assets WHERE user_id = ? AND cache_key IN (${keyed.map(() => "?").join(",")})`)
@@ -143,10 +204,10 @@ export async function provisionAssets(env: Env, userId: string, projectId: strin
 
   let estimate = 0;
   let reused = 0;
-  for (const { asset, cacheKey } of keyed) {
+  for (const { asset, cacheKey, source } of keyed) {
     const row = existing.get(cacheKey);
     if (row && row.status === "ready") reused++;
-    else if (!row || row.status === "failed" || row.status === "pending") estimate += estimateCredits(asset, plan.meshyModel);
+    else if (!row || row.status === "failed" || row.status === "pending") estimate += estimateCredits(asset, plan.meshyModel, !!source);
     // rows already in flight were paid for by the job that started them
   }
 
@@ -175,14 +236,17 @@ export async function provisionAssets(env: Env, userId: string, projectId: strin
 
   const ids: Record<string, string> = {};
   const t = now();
-  for (const { asset, cacheKey } of keyed) {
+  for (const { asset, cacheKey, source } of keyed) {
+    // The same picture uploaded again points the model at the newest copy of the file.
     const row = await env.DB.prepare(
-      `INSERT INTO assets (id, user_id, cache_key, name, kind, prompt, rig_mode, ai_model, spec, status, created_at, updated_at, last_used_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-       ON CONFLICT (user_id, cache_key) DO UPDATE SET last_used_at = excluded.last_used_at
+      `INSERT INTO assets (id, user_id, cache_key, name, kind, prompt, rig_mode, ai_model, spec, status, source_image_key, source_image_type, created_at, updated_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, cache_key) DO UPDATE SET last_used_at = excluded.last_used_at,
+         source_image_key = COALESCE(excluded.source_image_key, assets.source_image_key),
+         source_image_type = COALESCE(excluded.source_image_type, assets.source_image_type)
        RETURNING id, status`,
     )
-      .bind(newId("ast"), userId, cacheKey, asset.name, asset.kind, asset.prompt, asset.rig, plan.meshyModel, JSON.stringify(asset), t, t, t)
+      .bind(newId("ast"), userId, cacheKey, asset.name, asset.kind, asset.prompt, asset.rig, plan.meshyModel, JSON.stringify(asset), source?.key ?? null, source?.type ?? null, t, t, t)
       .first<{ id: string; status: string }>();
     if (!row) throw new PipelineError("internal", "Could not record a model.", true);
     if (row.status === "failed") {
@@ -205,12 +269,20 @@ async function planTheScene(ctx: Ctx): Promise<Outcome> {
   const interpretation = ctx.state.interpretation;
   if (!interpretation) return { kind: "next", stage: "understanding_prompt" };
   const library = await animationLibrary(ctx.env);
-  const reply = await planScene(ctx.env, interpretation, ctx.params.prompt, settingsOf(ctx), ctx.plan, library);
+  const attached = ctx.params.images ?? [];
+  const seen = alignImageBriefs(interpretation.images ?? [], attached.length);
+  const reply = await planScene(ctx.env, interpretation, ctx.params.prompt, settingsOf(ctx), ctx.plan, library, seen);
   await recordCost(ctx.env, ctx.job.user_id, ctx.job.id, "gemini", reply.tokens, `plan (${reply.model})`);
-  const { assets, world, notes } = planToAssets(reply.data, ctx.plan, ctx.params.style, library);
+  const { assets, world, notes, imageOf } = planToAssets(reply.data, ctx.plan, ctx.params.style, library, seen);
   if (assets.length === 0) throw new PipelineError("gemini_invalid_output", "The plan contained no models.", true);
 
-  const provisioned = await provisionAssets(ctx.env, ctx.job.user_id, ctx.project.id, ctx.plan, assets);
+  // Which uploaded file each image-made model comes from.
+  const sources: Record<string, JobImage> = {};
+  for (const [assetId, index] of Object.entries(imageOf)) {
+    const image = attached[index - 1];
+    if (image) sources[assetId] = image;
+  }
+  const provisioned = await provisionAssets(ctx.env, ctx.job.user_id, ctx.project.id, ctx.plan, assets, sources);
   ctx.state.assets = assets;
   ctx.state.assetIds = provisioned.ids;
   ctx.state.world = world;
@@ -219,7 +291,7 @@ async function planTheScene(ctx: Ctx): Promise<Outcome> {
     .filter((b) => b.end > b.start);
   await saveState(ctx);
   await addWarnings(ctx.env, ctx.job, notes);
-  log("scene_planned", { job: ctx.job.id, assets: assets.length, reused: provisioned.reused, estimate: provisioned.estimate });
+  log("scene_planned", { job: ctx.job.id, assets: assets.length, fromImages: Object.keys(sources).length, reused: provisioned.reused, estimate: provisioned.estimate });
   return { kind: "next", stage: "generating_models", detail: provisioned.reused ? `Reusing ${provisioned.reused} of your existing models` : undefined };
 }
 

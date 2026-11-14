@@ -214,6 +214,7 @@ export async function deleteUserData(env: Env, userId: string): Promise<void> {
   await findStorage(env)?.deletePrefix(`users/${userId}/`);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM project_assets WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)").bind(userId),
+    env.DB.prepare("DELETE FROM project_images WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM videos WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM render_jobs WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM scenes WHERE user_id = ?").bind(userId),

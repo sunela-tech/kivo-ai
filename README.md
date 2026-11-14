@@ -4,6 +4,8 @@
 
 > Write an idea → **Meshy** creates the 3D models → **Gemini** directs the animation → **Blender** renders the scene → Kivo delivers an **MP4**.
 
+You can also start from your own pictures: upload an image of a character or object and Kivo has Meshy build a 3D model of it and puts it in the scene, with or without a written idea.
+
 Simple Mode does all of that from one prompt. Advanced Mode opens a full 3D editor — viewport, timeline, cameras, lights, materials, shots and an AI Director — so you can change anything before you render. Both modes are available on every plan, including Free.
 
 ## How it works
@@ -111,5 +113,6 @@ cd services/renderer && pip install -r requirements-dev.txt && python -m pytest 
 - **Progress bars** appear only where a real number exists: Meshy's task progress and Blender's frame count. Other stages show that they are running, without a percentage.
 - **"Completed"** is set only after the MP4 is in file storage and passes verification (decodes as H.264 with the expected frame count and size on the render worker; container and codec checked again by the Worker).
 - **Blender never runs on Workers.** Rendering needs a separate machine running `services/renderer`. Without one, jobs wait in the queue and then fail with a refund and a clear message.
+- **Uploaded images become models, not backdrops.** Meshy's Image to 3D needs one clear object or character per picture. A landscape, a group shot or a screenshot is not turned into a model; Kivo says which image was skipped and why, and uses it only as a reference for the setting. The model is Meshy's reconstruction of the picture, so its back and hidden sides are invented.
 - **Sky and atmosphere** are world lighting in Blender, not Meshy models. Every visible object, including the ground, is a Meshy model.
 - **Audio** is not generated; videos are silent.
