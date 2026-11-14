@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-
 from . import words
 from .doc import ADV, GAP, Doc, fit_size
 from .words import pick

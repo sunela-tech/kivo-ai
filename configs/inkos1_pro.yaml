@@ -40,7 +40,7 @@ train:
   batch_size: 16                   # raise on a GPU (32-64 fits in 12 GB)
   lr: 2.0e-4
   min_lr: 2.0e-5
-  warmup_steps: 500
+  warmup_steps: 200
   schedule_epochs: null
   weight_decay: 0.01
   betas: [0.9, 0.99]

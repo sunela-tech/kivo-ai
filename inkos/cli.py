@@ -49,6 +49,8 @@ def cmd_data(a):
     elif a.action == "info":
         from .data import store
         info = store.dataset_info(paths.data_dir(cfg.id))
+        if info and "shards" in info:
+            info = {**info, "shards": {k: len(v) for k, v in info["shards"].items()}}
         print(json.dumps(info, indent=2) if info else f"no prepared dataset for {cfg.id}")
 
 

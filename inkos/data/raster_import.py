@@ -16,7 +16,6 @@ import re
 import time
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 
 from .. import bitmap, paths

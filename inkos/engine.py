@@ -14,10 +14,8 @@ import json
 import random
 import threading
 import time
-from pathlib import Path
 
 import torch
-from PIL import Image
 
 from . import bitmap, paths
 from .config import Config, load_config, model_fingerprint, model_ids
