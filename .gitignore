@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Generated locally, never committed:
+# prepared training sets and downloaded sources
+/data/
+# checkpoints, metrics, training status
+/runs/
+# your generated images
+/projects/
+
+# Installed inference weights stay local, except the small INKOS 1 export
+# (about 13 MB), which is committed so the interface works after cloning.
+/models/*
+!/models/inkos1/

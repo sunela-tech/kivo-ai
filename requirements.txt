@@ -1,0 +1,8 @@
+# INKOS runtime. Nothing else is needed for training, inference or the interface.
+torch>=2.2
+numpy>=1.26
+pillow>=10.0
+pyyaml>=6.0
+
+# Optional, for the test suite:
+# pytest>=8.0

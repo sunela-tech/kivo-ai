@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inkos"
+version = "0.1.0"
+description = "INKOS 1 and INKOS 1 Pro: local, from-scratch models that generate pure black-and-white PNG images"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.2", "numpy>=1.26", "pillow>=10.0", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+inkos = "inkos.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["inkos*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

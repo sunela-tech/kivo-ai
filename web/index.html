@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
+<title>INKOS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>INKOS</h1>
+    <p>Local 1-bit image models</p>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" id="tab-generate" data-view="generate" aria-selected="true">Generate</button>
+    <button role="tab" id="tab-gallery" data-view="gallery" aria-selected="false">Gallery</button>
+    <button role="tab" id="tab-models" data-view="models" aria-selected="false">Models</button>
+    <button role="tab" id="tab-training" data-view="training" aria-selected="false">Training</button>
+  </nav>
+</header>
+
+<p class="banner" id="banner" hidden role="alert"></p>
+
+<main>
+
+  <!-- ============================ GENERATE ============================ -->
+  <section class="view" id="view-generate" role="tabpanel" aria-labelledby="tab-generate">
+    <div class="split">
+      <form class="pane" id="gen-form" autocomplete="off">
+        <fieldset>
+          <legend>Model</legend>
+          <div class="model-picker" id="model-picker" role="radiogroup" aria-label="Model"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend><label for="prompt">Prompt</label></legend>
+          <textarea id="prompt" rows="4" maxlength="2000" spellcheck="false"
+                    placeholder="Describe the image. One item per line also works."></textarea>
+          <p class="hint" id="prompt-hint"></p>
+          <div class="chips" id="examples" aria-label="Example prompts"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Size</legend>
+          <div class="segmented" id="size-picker" role="radiogroup" aria-label="Image size in pixels"></div>
+        </fieldset>
+
+        <details class="more">
+          <summary>More settings</summary>
+          <div class="grid2">
+            <label>Seed <input type="number" id="seed" min="0" max="2147483647" inputmode="numeric" placeholder="random"></label>
+            <label data-for="inkscript-transformer">Temperature <input type="number" id="temperature" min="0" max="2" step="0.05" inputmode="decimal"></label>
+            <label data-for="bit-diffusion-unet">Denoising steps <input type="number" id="steps" min="1" max="200" inputmode="numeric"></label>
+            <label data-for="bit-diffusion-unet">Guidance <input type="number" id="guidance" min="0" max="20" step="0.5" inputmode="decimal"></label>
+            <label>Save to project <select id="project"></select></label>
+            <label>New project <span class="row"><input type="text" id="new-project" maxlength="40" placeholder="name"><button type="button" id="add-project" class="small">Add</button></span></label>
+          </div>
+        </details>
+
+        <button type="submit" class="primary" id="generate">Generate</button>
+
+        <div class="progress" id="progress" hidden>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><span id="progress-fill"></span></div>
+          <p id="progress-text" aria-live="polite"></p>
+        </div>
+      </form>
+
+      <div class="pane result">
+        <div class="frame" id="frame">
+          <p class="empty" id="frame-empty">The image appears here.<br>Pure black and white, no grey.</p>
+          <img id="result-img" alt="" hidden>
+        </div>
+        <div id="result-info" hidden>
+          <p class="notice" id="result-notice" hidden></p>
+          <dl class="facts" id="result-facts"></dl>
+          <div class="actions">
+            <a class="button" id="download" download>Download PNG</a>
+            <button type="button" id="regenerate">Regenerate</button>
+            <button type="button" id="same-seed">Same seed</button>
+            <button type="button" id="toggle-scale" aria-pressed="false">Actual pixels</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ GALLERY ============================ -->
+  <section class="view" id="view-gallery" role="tabpanel" aria-labelledby="tab-gallery" hidden>
+    <div class="toolbar">
+      <label>Project <select id="gallery-project"></select></label>
+      <span class="count" id="gallery-count"></span>
+      <button type="button" id="gallery-refresh">Refresh</button>
+    </div>
+    <p class="empty block" id="gallery-empty" hidden>No images in this project yet. Everything you generate is saved here, on this machine.</p>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="detail" id="detail" hidden>
+      <div class="frame"><img id="detail-img" alt=""></div>
+      <div>
+        <dl class="facts" id="detail-facts"></dl>
+        <div class="actions">
+          <a class="button" id="detail-download" download>Download PNG</a>
+          <button type="button" id="detail-reuse">Use this prompt</button>
+          <button type="button" id="detail-delete">Delete</button>
+          <button type="button" id="detail-close">Close</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ MODELS ============================ -->
+  <section class="view" id="view-models" role="tabpanel" aria-labelledby="tab-models" hidden>
+    <div class="machine" id="machine"></div>
+    <div class="cards" id="model-cards"></div>
+  </section>
+
+  <!-- ============================ TRAINING ============================ -->
+  <section class="view" id="view-training" role="tabpanel" aria-labelledby="tab-training" hidden>
+    <div class="toolbar">
+      <p class="lead">Training and inference are separate. Training writes checkpoints under <code>runs/</code>; generation only reads weights. Numbers below are read from the trainer's own status file.</p>
+      <label class="check"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
+      <button type="button" id="training-refresh">Refresh</button>
+    </div>
+    <div class="cards" id="training-cards"></div>
+  </section>
+
+</main>
+
+<footer>
+  <span id="foot-server">Connecting to the local server ...</span>
+  <span>Runs offline. Nothing leaves this machine.</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

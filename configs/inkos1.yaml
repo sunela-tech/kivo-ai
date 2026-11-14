@@ -1,0 +1,75 @@
+# INKOS 1 - lightweight vector-program model for notes, logs, icons,
+# sketches, diagrams and charts.
+id: inkos1
+name: INKOS 1
+architecture: inkscript-transformer
+summary: >-
+  Writes a short drawing program (strokes, shapes, text) that is rasterised to
+  pure black and white at any size. Small, fast, runs on a CPU.
+specialties: [notes and journals, logs and lists, icons and symbols, sketches, diagrams, charts]
+
+# Training target requested for this model. This is a goal, not a claim:
+# the number of epochs actually completed is recorded by the trainer.
+target_epochs: 10000
+
+model:
+  d_model: 256
+  n_layers: 8
+  n_heads: 8
+  d_ff: 1024
+  max_prompt: 256        # prompt characters
+  max_program: 320       # drawing tokens per image
+  dropout: 0.0
+
+data:
+  count: 330000          # training drawings to prepare
+  val_count: 4000
+  shard_size: 20000
+  seed: 1
+  # share of each family in the prepared set
+  mix:
+    notes: 0.22          # notes, to-do lists, journals, logs, tables, signs
+    charts: 0.10         # bar, line, pie, scatter, progress
+    diagrams: 0.10       # flowcharts, mind maps, trees, timelines, ...
+    symbols: 0.08        # procedural shapes and simple illustrations
+    icons: 0.17          # open-licensed stroke icon sets (MIT / ISC)
+    sketches: 0.33       # Quick, Draw! sketches (CC BY 4.0)
+
+train:
+  batch_size: 32
+  lr: 6.0e-4
+  min_lr: 6.0e-5
+  warmup_steps: 400
+  schedule_epochs: null  # cosine horizon; null = target_epochs
+  weight_decay: 0.02
+  betas: [0.9, 0.98]
+  grad_clip: 1.0
+  ema_decay: 0.999
+  log_every: 20
+  val_every_steps: 1500
+  val_batches: 40
+  checkpoint_minutes: 10
+  keep_checkpoints: 3
+  seed: 1
+
+sample:
+  temperature: 0.7
+  top_p: 0.95
+
+inference:
+  sizes: [256, 512, 1024]   # any size works; the program is resolution independent
+  default_size: 512
+
+preview_prompts:
+  - "note Groceries: milk; eggs; bread; coffee"
+  - "todo: [x] Pay rent; Call Anna; Buy stamps"
+  - "handwritten journal 2026-11-14: Woke up early and went for a walk before breakfast."
+  - "log: 09:00 boot ok; 09:05 sync started; 09:20 sync done"
+  - "bar chart: 3, 7, 5, 9"
+  - "pie chart: Rent 50, Food 30, Fun 20"
+  - "flowchart: Start -> Check -> Done"
+  - "mind map: Project; Design; Build; Test; Launch"
+  - "house icon"
+  - "filled star"
+  - "sketch of a cat"
+  - "sketch of a bicycle"
