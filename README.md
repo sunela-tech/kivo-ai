@@ -33,10 +33,10 @@ trainer's status files:
 | --- | --- | --- | --- |
 | INKOS 1 | 10,000 epochs | **1 complete epoch** (330,000 samples, 10,313 steps, 2.5 hours of training) | installed in `models/inkos1/` |
 | INKOS 1 Pro | 20,000 epochs | **0 complete epochs plus 6% of the next** (3,760 samples, 235 steps, 19.6 minutes of training) | not included |
+| INKOS 1.1 | 10,000 epochs | **0 complete epochs plus 21% of the next** (69,888 samples, 2,184 steps, 41.5 minutes of training) | installed in `models/inkos1_1/` |
+| INKOS 1.1 Pro | 20,000 epochs | **0 complete epochs plus 49% of the next** (2,912 samples, 182 steps, 14.4 minutes of training) | not included |
 
 **INKOS 1** has seen each of its 330,000 training drawings exactly once. Measured on held-out prompts (`python -m inkos eval --model inkos1`): validation loss 1.50, 59% next-token accuracy, 97% pointer accuracy; 89% of freely sampled programs are valid even without the grammar mask; 90% of the requested text strings land on the page exactly.
-
-What that means in practice:
 
 * **Works:** notes, to-do lists, journals, logs, schedules, tables, flowcharts, mind maps and timelines come out right most of the time, with occasional slips such as a wrong checkbox or a label running off the edge (validation loss 0.05 to 0.15 on these families).
 * **Approximate:** charts have the right structure and labels, but bar heights and pie shares do not follow the numbers yet (mean bar-height error 32 of 128 grid units in the evaluation sample).
@@ -46,7 +46,21 @@ What that means in practice:
 
 *Sixteen prompts (listed in `docs/samples/inkos1.json`) drawn with the installed one-epoch weights at 512 px. The last row shows the icon and sketch failures.*
 
-**INKOS 1 Pro** was only run long enough to prove the pipeline end to end: 235 steps, 3,760 of its 60,000 training images seen once (6% of one epoch). Its validation loss fell from 1.04 to 0.36, which at this stage only means it has learned how much of a page is ink: its samples are abstract black-and-white blobs, not drawings (edge density 0.031 against 0.110 for real training images). No Pro weights are included. It needs a GPU and a long run before it draws anything recognisable, and it needs real, licensed artwork before it can approach professional manga (see [DATA_LICENSES.md](DATA_LICENSES.md)).
+**INKOS 1.1** started from INKOS 1's weights (1 epoch) and was then trained on its own colour data for 2,184 steps: 69,888 of 330,000 drawings, 21% of one epoch, so its own count is still 0 complete epochs. Measured the same way on its own colour validation set: loss 1.08 (not directly comparable with INKOS 1's figure: the colour set has fewer sketches, the hardest family), 70% next-token accuracy, 98% pointer accuracy, 92% of text strings exact. On colour: 98% of generated drawings use exactly the colours of their reference, and 46% of the pixels inked in either drawing carry the same colour in both (a strict measure that also drops wherever the shapes differ, not only where a colour is wrong).
+
+* **Works:** the three colour forms on written pages and diagrams: one colour (`blue note ...`), two colours (`black and red todo ...` puts text in black and boxes and rules in red) and `colorful` flowcharts, stacks, trees and tables, with white lettering on dark fills.
+* **Approximate:** bar heights still do not follow the numbers. A `colorful` pie is filled in a single colour, because the colour scheme it was trained on treats the pie's circle as one shape.
+* **Not learned yet:** symbols, icons and sketches, as in INKOS 1. A `red heart` comes out right, but `colorful three stars` drew faces, and `yellow sun` and the tree sketch are not recognisable.
+
+![Sixteen prompts drawn by INKOS 1.1](docs/samples/inkos1_1.png)
+
+*Sixteen prompts (listed in `docs/samples/inkos1_1.json`) drawn with the installed INKOS 1.1 weights at 512 px.*
+
+**INKOS 1 Pro** was only run long enough to prove the pipeline end to end: 235 steps, 3,760 of its 60,000 training images seen once (6% of one epoch). Its validation loss fell from 1.04 to 0.36, which at this stage only means it has learned how much of a page is ink: its samples are abstract black-and-white blobs, not drawings (edge density 0.031 against 0.110 for real training images).
+
+**INKOS 1.1 Pro** was run the same way: 182 steps, 2,912 images (a 6,000-image colour set was prepared here instead of the full 60,000, so the epoch fraction shown above is of that smaller set). Its validation loss fell from 1.47 at step 70 to 0.77 at step 140, and at fixed noise it gives 86% of pixels the right colour, but like INKOS 1 Pro its samples are flat patches of colour, not drawings. Their colour mix is also off: no green at all and 20% yellow, against 8% green and 6% yellow in real training images.
+
+No Pro weights are included. Both Pro models need a GPU and a long run before they draw anything recognisable, and they need real, licensed artwork before they can approach professional manga (see [DATA_LICENSES.md](DATA_LICENSES.md)).
 <!-- STATE:END -->
 
 The epoch counts above are **targets**. The trainer records what was really
@@ -105,6 +119,8 @@ Each plan has an optional `price` label in the config, empty by default,
 which is only displayed. The local server and `python -m inkos generate`
 both enforce the active plan. Training, evaluation and export are never
 limited.
+
+![The Plans tab](docs/interface-plans.png)
 
 ## Training
 
@@ -208,8 +224,10 @@ on the 4-core CPU this project was built on:
 <!-- BENCH:BEGIN -->
 | Model | Measured training speed | One epoch | Full target |
 | --- | --- | --- | --- |
-| INKOS 1 | 50.57 samples/s (batch 32) | 1.8 hours for 330,000 samples | 10,000 epochs: 2.1 years |
-| INKOS 1 Pro | 4.25 samples/s (batch 16) | 3.9 hours for 60,000 samples | 20,000 epochs: 9.0 years |
+| INKOS 1 | 45.83 samples/s (batch 32) | 2.0 hours for 330,000 samples | 10,000 epochs: 2.3 years |
+| INKOS 1 Pro | 3.77 samples/s (batch 16) | 4.4 hours for 60,000 samples | 20,000 epochs: 10.1 years |
+| INKOS 1.1 | 49.11 samples/s (batch 32) | 1.9 hours for 330,000 samples | 10,000 epochs: 2.1 years |
+| INKOS 1.1 Pro | 3.34 samples/s (batch 16) | 5.0 hours for 60,000 samples | 20,000 epochs: 11.4 years |
 <!-- BENCH:END -->
 
 The targets are large: 10,000 epochs of INKOS 1 or INKOS 1.1 are 3.3 billion
@@ -253,7 +271,7 @@ refiner's pixel accuracy and the colour mix of generated against real images.
 `python -m inkos serve` starts a local server (standard library only) and the
 HTML interface in `web/`:
 
-![The Generate tab with a to-do list drawn by INKOS 1](docs/interface-generate.png)
+![The Generate tab with a colourful flowchart drawn by INKOS 1.1](docs/interface-generate.png)
 
 * **Generate**: model selector with each model's real training state, prompt
   box with example prompts, size selector, optional seed and sampling

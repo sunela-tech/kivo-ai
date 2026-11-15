@@ -159,6 +159,19 @@ def benchmark(model_id: str, device: torch.device, steps: int = 3) -> dict:
     return res
 
 
+def _bench_job(model_id: str, device: str) -> dict:
+    return benchmark(model_id, torch.device(device))
+
+
+def benchmark_isolated(model_id: str, device: torch.device) -> dict:
+    """Run one benchmark in a fresh process, so the reported peak memory is
+    that model's alone and not left over from an earlier benchmark."""
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn")) as ex:
+        return ex.submit(_bench_job, model_id, str(device)).result()
+
+
 def _dur(sec: float) -> str:
     for unit, n in (("years", 365 * 86400), ("days", 86400), ("hours", 3600), ("minutes", 60)):
         if sec >= n:
@@ -181,13 +194,14 @@ def report(bench: bool = False) -> dict:
             print(f"  [{c['level']:>4}] {c['text']}")
         if bench:
             print("  benchmarking ...", flush=True)
-            results[mid] = benchmark(mid, pick_device(None))
+            results[mid] = benchmark_isolated(mid, pick_device(None))
         b = results.get(mid)
         if b:
             print(f"  measured on {b['device']}: training {b['train_samples_per_sec']} samples/s at batch {b['batch_size']}; "
                   f"one epoch of {b['dataset_size_assumed']:,} samples = {_dur(b['seconds_per_epoch'])}; "
                   f"{b['target_epochs']:,} epochs = {_dur(b['seconds_to_target'])}")
-            print(f"  generation: {b['generation_seconds']} s ({b['generation_note']}); peak process memory {b['peak_rss_mb']} MB")
+            print(f"  generation: {b['generation_seconds']} s ({b['generation_note']}); "
+                  f"peak memory of the benchmark process {b['peak_rss_mb']} MB")
     if bench:
         paths.RUNS.mkdir(parents=True, exist_ok=True)
         (paths.RUNS / "hardware.json").write_text(json.dumps(results, indent=2))
