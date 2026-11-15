@@ -38,6 +38,8 @@ const APPEARANCE = {
 const HINTS = {
   inkos1: 'INKOS 1 follows the patterns it was trained on: note, todo, journal, log, table, sign, bar / line / pie chart, flowchart, mind map, timeline, icon and sketch. Text after the colon is copied onto the page exactly; separate items with ";" or new lines.',
   inkos1_1: 'INKOS 1.1 understands the same patterns. Start with a colour instruction: "blue ...", "black and red ..." (text, then marks) or "colorful ...".',
+  inkos1_pro: 'INKOS 1 Pro paints black-and-white manga pixel by pixel. Describe a portrait ("manga portrait, girl, long black hair, smiling"), a page of panels or a background. The first run downloads about 115 MB; a graphics processor (WebGPU) makes it much faster.',
+  inkos1_1_pro: 'INKOS 1.1 Pro paints in the six E-Ink colours. Describe a portrait, panels or a background; colour words such as "red hair" or "blue uniform" steer the palette. The first run downloads about 115 MB.',
 };
 
 // ---------------------------------------------------------------------------
@@ -141,7 +143,7 @@ function renderPicker() {
   if (!S.model || !inPlan(modelById(S.model))) S.model = (cloudModels().find(inPlan) || cloudModels()[0]).id;
   const html = S.app.models.map((m) => {
     const ok = inPlan(m);
-    const state = !m.cloud ? 'Desktop app only' : ok ? `Trained: ${epochsLine(m.training, m.target_epochs)}` : `Not in the ${plan().name} plan`;
+    const state = !m.cloud ? 'Python app only' : ok ? `Trained: ${epochsLine(m.training, m.target_epochs)}` : `Not in the ${plan().name} plan`;
     return `<button type="button" role="radio" aria-checked="${m.id === S.model}" data-model="${esc(m.id)}" data-locked="${!ok}" ${m.cloud ? '' : 'disabled'}>
       <span class="name">${esc(m.name)}</span><span class="what">${esc(m.specialties.slice(0, 3).join(', '))}</span>
       <span class="state">${esc(state)}</span></button>`;
@@ -159,6 +161,8 @@ function renderModelDependent() {
   setHTML($('examples'), m.examples.slice(0, 8).map((x) => `<button type="button" data-example="${esc(x)}" title="${esc(x)}">${esc(x)}</button>`).join(''));
   $('prompt-hint').textContent = HINTS[m.id] || '';
   $('temperature').placeholder = (m.sample && m.sample.temperature) ?? 0.7;
+  document.querySelectorAll('[data-engine]').forEach((el) => { el.hidden = el.dataset.engine !== m.engine; });
+  if (m.engine === 'pro') $('guidance').placeholder = m.sample.guidance;
   const u = S.me.usage, spent = u.limit !== null && u.remaining <= 0;
   $('generate').disabled = S.busy || spent;
   $('generate').textContent = spent ? 'Daily limit reached' : S.busy ? 'Generating ...' : 'Generate';
@@ -205,18 +209,23 @@ async function generate(over = {}) {
   const seed = seedIn !== '' && seedIn !== null ? Number(seedIn) >>> 0 : crypto.getRandomValues(new Uint32Array(1))[0] >>> 1;
   const tIn = over.temperature !== undefined ? over.temperature : $('temperature').value;
   const temperature = tIn !== '' && tIn !== null ? Math.min(2, Math.max(0, Number(tIn))) : m.sample.temperature;
+  const steps = Number(over.steps || $('steps').value) || m.sample.preview_steps || 16;
+  const gIn = over.guidance !== undefined ? over.guidance : $('guidance').value;
+  const guidance = gIn !== '' && gIn !== null && Number.isFinite(Number(gIn)) ? Math.min(8, Math.max(1, Number(gIn))) : m.sample.guidance;
   const project = $('project').value || 'default';
-  S.lastReq = { model: m.id, prompt, size, temperature };
+  S.lastReq = { model: m.id, prompt, size, temperature, steps, guidance };
   setBusy(true);
   try {
     if (!S.loaded.has(m.id)) {
-      await engine({ type: 'load', model: m.id, token: await token() }, showProgress);
+      const r = await engine({ type: 'load', model: m.id, engine: m.engine, token: await token() }, showProgress);
+      if (r.info && r.info.backend) S.backend = r.info.backend;
       S.loaded.add(m.id);
     }
     showProgress({ stage: 'checking your plan', fraction: 0 });
     const ticket = await api('POST', '/api/generations', { model: m.id, size });
     S.me.usage = ticket.usage;
-    const r = await engine({ type: 'generate', model: m.id, prompt, size, seed, temperature, topP: m.sample.top_p }, showProgress);
+    const r = await engine(m.engine === 'pro' ? { type: 'generate', model: m.id, prompt, size, seed, steps, guidance }
+      : { type: 'generate', model: m.id, prompt, size, seed, temperature, topP: m.sample.top_p }, showProgress);
     showProgress({ stage: 'saving to your gallery', fraction: 1 });
     const saved = await api('POST', '/api/gallery', { project, png: b64(r.png), meta: r.meta });
     showResult(r.png, { ...r.meta, project, id: saved.id, bytes: r.png.length });
@@ -238,7 +247,8 @@ function factsHTML(meta) {
     rows.push(['Program', `${meta.tokens} tokens${meta.program ? ', ' + meta.program.ops + ' commands' : ''}${meta.complete ? '' : ' (cut off at the token limit)'}`]);
   }
   if (meta.temperature !== undefined && meta.temperature !== null) rows.push(['Temperature', meta.temperature]);
-  if (meta.seconds) rows.push(['Time', `${meta.seconds} s on this device`]);
+  if (meta.steps) rows.push(['Denoising', `${meta.steps} steps, guidance ${meta.guidance}`]);
+  if (meta.seconds) rows.push(['Time', `${meta.seconds} s on this device${meta.backend ? (meta.backend === 'webgpu' ? ' (graphics processor, WebGPU)' : ' (processor, WebAssembly)') : ''}`]);
   if (meta.colors) {
     rows.push(['Colours', Object.entries(meta.colors).filter(([k, v]) => k !== 'white' && v > 0).map(([k, v]) => `${k} ${(100 * v).toFixed(1)}%`).join(', ') || 'none']);
   } else if (meta.ink) rows.push(['Ink', `${(100 * (meta.ink.black || 0)).toFixed(1)}% black`]);
@@ -361,7 +371,7 @@ function renderModels() {
   const pal = S.app.palette;
   setHTML($('model-cards'), S.app.models.map((m) => {
     const ok = inPlan(m), t = m.training;
-    const avail = !m.cloud ? 'desktop app only' : ok ? 'in your plan' : 'not in your plan';
+    const avail = !m.cloud ? 'Python app only' : ok ? 'in your plan' : 'not in your plan';
     return `<article class="card">
       <header><div><h2>${esc(m.name)}</h2><p>${esc(m.summary)}</p></div><span class="badge ${ok ? 'on' : ''}">${avail}</span></header>
       ${m.cloud ? `<section><h3>Training completed</h3>
@@ -370,8 +380,9 @@ function renderModels() {
       <section><table>
         <tr><th>Parameters</th><td class="num">${(m.params / 1e6).toFixed(2)} million</td></tr>
         <tr><th>Download</th><td class="num">${(m.weights_bytes / 1e6).toFixed(1)} MB, once per device</td></tr>
+        <tr><th>Runs on</th><td class="num">${m.engine === 'pro' ? 'onnxruntime-web: WebGPU, else WebAssembly' : 'JavaScript, any browser'}</td></tr>
         <tr><th>Sizes</th><td class="num">${m.sizes.join(', ')} px</td></tr></table></section>`
-        : `<section><p>This model is part of the INKOS desktop app. It needs far more computing power than a browser offers and has not been trained yet.</p></section>`}
+        : `<section><p>These weights are not installed on the server yet. The model runs in the INKOS Python app.</p></section>`}
       <section><h3>Built for</h3><div class="tags">${m.specialties.map((s) => `<span>${esc(s)}</span>`).join('')}</div>
         ${m.palette ? `<div class="swatches" aria-label="Output palette">${pal.names.map((n, i) => `<span><i style="background:rgb(${pal.rgb[i].join(',')})"></i>${esc(n)}</span>`).join('')}</div>`
           : '<p class="sub">Output: black and white, 1 bit per pixel.</p>'}</section>

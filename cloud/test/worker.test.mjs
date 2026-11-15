@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { issuerFromPublishableKey, resetKeyCache, userPlans } from '../src/auth.js';
 import worker, { planFor } from '../src/worker.js';
+import APP from '../public/data/app.json' with { type: 'json' };
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const HOST = 'test-host-1.clerk.accounts.dev';
@@ -28,16 +29,27 @@ function d1() {
   db.exec(readFileSync(here('../migrations/0001_init.sql'), 'utf8'));
   return { db, prepare: (sql) => new Stmt(db, sql) };
 }
-// Workers KV holding the weights, as cloud/README.md uploads them
+// Workers KV holding the weights, as upload_files.py uploads them: the INKOS 1
+// files from public/weights/, plus in-memory entries (some stored in parts)
+const MEM = new Map();
 const kv = {
   async getWithMetadata(key, { type }) {
+    assert.equal(type, 'stream');
+    if (MEM.has(key)) { const { bytes, metadata } = MEM.get(key); return { value: new Blob([bytes]).stream(), metadata }; }
     const f = here('../public/' + key);
     if (!/^weights\/[a-z0-9_]+\.(json|bin)$/.test(key) || !existsSync(f)) return { value: null, metadata: null };
     const bytes = readFileSync(f);
-    assert.equal(type, 'stream');
     return { value: new Blob([bytes]).stream(), metadata: { size: bytes.length } };
   },
+  async get(key, { type }) { return (await this.getWithMetadata(key, { type })).value; },
 };
+function storeKV(key, bytes, partSize) {
+  const n = Math.ceil(bytes.length / partSize);
+  for (let k = 1; k < n; k++) MEM.set(`${key}#${k}`, { bytes: bytes.subarray(k * partSize, (k + 1) * partSize), metadata: { part: k } });
+  MEM.set(key, { bytes: bytes.subarray(0, partSize), metadata: n > 1 ? { size: bytes.length, parts: n } : { size: bytes.length } });
+}
+// The Workers runtime's FixedLengthStream, without the length check
+globalThis.FixedLengthStream ??= class { constructor() { const t = new TransformStream(); this.readable = t.readable; this.writable = t.writable; } };
 
 // --- tokens ------------------------------------------------------------------
 const keyPair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
@@ -133,7 +145,9 @@ test('weights are only served to plans that include the model', async () => {
   assert.equal(r.headers.get('cache-control'), 'private, max-age=86400');
   assert.equal((await call('GET', '/weights/inkos1_1.bin', { tok: basic })).status, 403);
   assert.equal((await call('GET', '/weights/inkos1_1.json', { tok: await token({ pla: 'u:user_plus' }) })).status, 200);
-  assert.equal((await call('GET', '/weights/inkos1_pro.bin', { tok: await token({ pla: 'u:user_pro' }) })).status, 400);
+  assert.equal((await call('GET', '/weights/inkos1_pro.bin', { tok: await token({ pla: 'u:user_pro' }) })).status, 404);   // Pro: /weights/<id>/<file>
+  assert.equal((await call('GET', '/weights/inkos1/step.onnx', { tok: basic })).status, 404);
+  assert.equal((await call('GET', '/weights/nope.bin', { tok: basic })).status, 400);
   assert.equal((await call('GET', '/weights/%2e%2e%2fdata%2fapp.json', { tok: basic })).status, 404);
   assert.equal((await call('GET', '/weights/inkos1_1%2ebin', { tok: basic })).status, 404);
 });
@@ -225,4 +239,42 @@ test('weights stream from KV with their size', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('content-type'), 'application/octet-stream');
   assert.equal(r.body.length, readFileSync(here('../public/weights/inkos1.bin')).length);
+});
+
+test('Pro graphs: Studio only, stored in parts and streamed back whole', async () => {
+  const { call } = setup();
+  const pro = APP.models.find((m) => m.id === 'inkos1_pro');
+  assert.equal(pro.engine, 'pro');
+  const bytes = new Uint8Array(250_000).map((_, i) => (i * 31 + 7) & 255);
+  storeKV('weights/inkos1_pro/step.onnx', bytes, 100_000);           // 3 parts
+  storeKV('weights/inkos1_pro/manifest.json', new TextEncoder().encode('{"model":"inkos1_pro"}'), 1 << 20);
+  for (const pla of [undefined, 'u:user_plus']) {
+    const r = await call('GET', '/weights/inkos1_pro/step.onnx', { tok: await token(pla ? { pla } : {}) });
+    assert.equal(r.status, 403);
+    assert.equal(r.body.upgrade, true);
+  }
+  const studio = await token({ pla: 'u:user_pro' });
+  const r = await call('GET', '/weights/inkos1_pro/step.onnx', { tok: studio });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'application/octet-stream');
+  assert.deepEqual(r.body, bytes);
+  const m = await call('GET', '/weights/inkos1_pro/manifest.json', { tok: studio });
+  assert.deepEqual(m.body, { model: 'inkos1_pro' });
+  assert.equal((await call('GET', '/weights/inkos1_pro/refiner.onnx', { tok: studio })).status, 404);    // not uploaded
+  assert.equal((await call('GET', '/weights/inkos1_pro/%2e%2e%2fstep.onnx', { tok: studio })).status, 404);
+  assert.equal((await call('GET', '/weights/inkos1_pro/step.onnx')).status, 401);
+});
+
+test('onnxruntime-web is public, versioned and only from its own keys', async () => {
+  const { call } = setup();
+  storeKV('ort/1.31.1/ort-wasm-simd-threaded.asyncify.wasm', new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 9, 9]), 4);
+  const r = await call('GET', '/ort/1.31.1/ort-wasm-simd-threaded.asyncify.wasm');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'application/wasm');
+  assert.ok(r.headers.get('cache-control').includes('immutable'));
+  assert.deepEqual([...r.body], [0, 97, 115, 109, 1, 0, 0, 0, 9, 9]);
+  for (const p of ['/ort/1.31.1/ort.webgpu.bundle.min.mjs', '/ort/latest/ort.wasm', '/ort/1.31.1/../weights/inkos1.bin',
+    '/ort/1.31.1/evil.js', '/ort/1.31.1/ort%2fx.wasm']) {
+    assert.notEqual((await call('GET', p)).status, 200, p);
+  }
 });

@@ -5,8 +5,8 @@
 The file holds the page, the drawing engine (the same JavaScript as INKOS
 Cloud, checked against PyTorch), the font, and the float16 weights of
 INKOS 1 and INKOS 1.1 as base64. Open it in any current browser: no server,
-no install, no network. The Pro models are not included: they are untrained
-and too heavy for a browser.
+no install, no network. The Pro models are not included: at about 115 MB each
+they would make the file too heavy; they run in INKOS Cloud and the Python app.
 
 Needs: Python with the project's dependencies (to export the weights) and
 Node with esbuild (cd cloud && npm install).
@@ -49,6 +49,8 @@ def main():
     cloud_build.main()                                   # refresh cloud/public/{weights,data}
     pub = CLOUD / "public"
     app = json.loads((pub / "data" / "app.json").read_text())
+    for m in app["models"]:                              # the Pro models stay in the cloud and Python apps
+        m["cloud"] = m["cloud"] and m.get("engine") == "vector"
     data = {"app": app, "font": json.loads((pub / "data" / "font.json").read_text()), "version": __version__}
 
     parts = [f'<script type="application/json" id="inkos-data">{safe(json.dumps(data, separators=(",", ":")))}</script>',

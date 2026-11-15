@@ -8,7 +8,9 @@
     "test": "node --test test/engine.test.mjs test/worker.test.mjs",
     "dev": "wrangler dev",
     "migrate": "wrangler d1 migrations apply inkos --remote",
-    "deploy": "python3 build.py && wrangler deploy"
+    "deploy": "python3 build.py && wrangler deploy",
+    "test:pro": "node test/pro.browser.mjs inkos1_pro wasm && node test/pro.browser.mjs inkos1_1_pro wasm",
+    "upload": "python3 upload_files.py"
   },
   "devDependencies": {
     "wrangler": "4.162.0"

@@ -12,12 +12,15 @@
 
 import { Rng } from './rand.js';
 
+// onnxruntime-web, served by the Worker from KV (cloud/upload_weights.py); build.py checks the version
+export const ORT_VERSION = '1.31.1';
+export const ORT_BASE = `/ort/${ORT_VERSION}/`;
 let ort = null;
 
 async function runtime() {
   if (!ort) {
-    ort = await import('/ort/ort.webgpu.bundle.min.mjs');
-    ort.env.wasm.wasmPaths = '/ort/';
+    ort = await import(`${ORT_BASE}ort.webgpu.bundle.min.mjs`);
+    ort.env.wasm.wasmPaths = ORT_BASE;
     ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
     ort.env.wasm.proxy = false;
     ort.env.logLevel = 'error';

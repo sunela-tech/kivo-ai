@@ -34,11 +34,11 @@
     <div class="split welcome">
       <div class="pane">
         <h2>Black-and-white and six-colour pictures for E-Ink screens.</h2>
-        <p class="lead">Notes, to-do lists, journals, logs, tables, charts and diagrams, written as a drawing program by a small model that runs on your device, then printed as a pure 1-bit or six-colour PNG.</p>
+        <p class="lead">Notes, to-do lists, journals, logs, tables, charts and diagrams, written as a drawing program by a small model that runs on your device, then printed as a pure 1-bit or six-colour PNG. The Pro models paint manga and illustration pixel by pixel, also on your device.</p>
         <ul class="plain">
           <li><b>Basic</b>INKOS 1, black and white, 30 images a day. Free.</li>
           <li><b>Plus</b>Adds INKOS 1.1 in six colours and 1024 px.</li>
-          <li><b>Studio</b>Everything, without daily limits.</li>
+          <li><b>Studio</b>Adds INKOS 1 Pro and INKOS 1.1 Pro for manga and illustration, without daily limits.</li>
         </ul>
         <p class="sub" id="welcome-status">Loading sign-in ...</p>
       </div>
@@ -72,7 +72,9 @@
           <summary>More settings</summary>
           <div class="grid2">
             <label>Seed <input type="number" id="seed" min="0" max="2147483647" inputmode="numeric" placeholder="random"></label>
-            <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.05" inputmode="decimal" placeholder="0.7"></label>
+            <label data-engine="vector">Temperature <input type="number" id="temperature" min="0" max="2" step="0.05" inputmode="decimal" placeholder="0.7"></label>
+            <label data-engine="pro" hidden>Steps <select id="steps"><option value="16">16 (faster)</option><option value="32">32 (finer)</option></select></label>
+            <label data-engine="pro" hidden>Guidance <input type="number" id="guidance" min="1" max="8" step="0.5" inputmode="decimal" placeholder="3"></label>
             <label>Save to project <select id="project"></select></label>
             <label>New project <span class="row"><input type="text" id="new-project" maxlength="40" placeholder="name"><button type="button" id="add-project" class="small">Add</button></span></label>
           </div>
@@ -130,7 +132,7 @@
 
   <!-- ============================ MODELS ============================ -->
   <section class="view" id="view-models" role="tabpanel" aria-labelledby="tab-models" hidden>
-    <p class="lead">The models run in this browser: the page downloads their weights once (about 13 MB each) and draws on your device. Nothing you type is sent to a model server. Training happens elsewhere; the numbers below are the real training record of the weights served here.</p>
+    <p class="lead">The models run in this browser: the page downloads their weights once (about 13 MB for INKOS 1 and 1.1, about 115 MB for each Pro model) and draws on your device, on the graphics processor when the browser offers WebGPU. Nothing you type is sent to a model server. Training happens elsewhere; the numbers below are the real training record of the weights served here.</p>
     <div class="cards" id="model-cards"></div>
   </section>
 

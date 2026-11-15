@@ -4,16 +4,18 @@
 
 Writes (all generated, not committed), under cloud/public/:
 
-  weights/<model>.bin    float16 weights of each cloud model, tensors back to back
+  weights/<model>.bin    float16 weights of INKOS 1 and 1.1, tensors back to back
   weights/<model>.json   tensor index, model shape and the weights' training record
+  weights/<pro>/         INKOS 1 Pro and 1.1 Pro as ONNX graphs + manifest.json (pro_onnx.py)
   data/font.json         the single-stroke font, already smoothed
   data/app.json          models, plans, palette and drawing-language constants
   style.css              the shared stylesheet, copied from web/
 
 and cloud/src/static.gen.js, the page and engine bundled into the Worker.
 
-Only the INKOS 1 family runs in the browser. Its installed weights
+All four models run in the browser. Their installed weights
 (models/<id>/weights.pt) are converted as they are: nothing is trained here.
+A Pro model that is not installed is left out of the cloud app.
 """
 from __future__ import annotations
 
@@ -35,8 +37,9 @@ from inkos.vector import font, lang  # noqa: E402
 from inkos.vector import render as R  # noqa: E402
 
 OUT = ROOT / "cloud" / "public"
-CLOUD_MODELS = ("inkos1", "inkos1_1")          # vector-program models that fit in a browser
-LOCAL_ONLY = ("inkos1_pro", "inkos1_1_pro")
+VECTOR_MODELS = ("inkos1", "inkos1_1")         # drawing-program models: a small JavaScript port runs them
+PRO_MODELS = ("inkos1_pro", "inkos1_1_pro")    # pixel diffusion: ONNX graphs run by onnxruntime-web
+ALL_MODELS = VECTOR_MODELS + PRO_MODELS
 
 
 def export_weights(mid: str) -> dict:
@@ -70,23 +73,45 @@ def export_font():
                                                        separators=(",", ":")))
 
 
-def export_app(indexes: dict):
+def export_pro(mid: str) -> dict | None:
+    """ONNX graphs of an installed Pro model, or None when it is not installed."""
+    if not (ROOT / "models" / mid / "manifest.json").exists():
+        print(f"{mid}: not installed (python -m inkos export --model {mid}); left out of the cloud app")
+        return None
+    import pro_onnx
+    return pro_onnx.export_graphs(mid)
+
+
+def check_runtime():
+    """The page imports onnxruntime-web from /ort/<version>/; it must be the installed version."""
+    want = json.loads((ROOT / "cloud" / "node_modules" / "onnxruntime-web" / "package.json").read_text())["version"]
+    src = (OUT / "engine" / "pro.js").read_text()
+    if f"ORT_VERSION = '{want}'" not in src:
+        raise SystemExit(f"public/engine/pro.js does not name onnxruntime-web {want} (npm install, then update ORT_VERSION)")
+
+
+def export_app(indexes: dict, pros: dict):
     plans = yaml.safe_load((ROOT / "configs" / "plans.yaml").read_text())
     models = []
-    for mid in CLOUD_MODELS + LOCAL_ONLY:
+    for mid in ALL_MODELS:
         cfg = load_config(mid)
         m = {"id": mid, "name": cfg.name, "summary": " ".join(cfg.summary.split()), "specialties": list(cfg.specialties),
              "palette": bool(cfg.get("palette")), "target_epochs": int(cfg.target_epochs),
              "sizes": list(cfg.inference.sizes), "default_size": int(cfg.inference.default_size),
-             "examples": list(cfg.preview_prompts), "cloud": mid in CLOUD_MODELS}
+             "examples": list(cfg.preview_prompts), "engine": "pro" if mid in PRO_MODELS else "vector",
+             "cloud": mid in indexes or mid in pros, "sample": cfg.sample.plain(), "max_prompt": int(cfg.model.max_prompt)}
         if mid in indexes:
             ix = indexes[mid]
             m.update(training=ix["training"], params=sum(int(np.prod(t["shape"])) for t in ix["tensors"].values()),
-                     weights_bytes=ix["elements"] * 2, sample=cfg.sample.plain(), max_prompt=int(cfg.model.max_prompt))
+                     weights_bytes=ix["elements"] * 2)
+        if mid in pros:
+            pm = pros[mid]
+            m.update(training=pm["training"], params=pm["params"], weights_bytes=sum(f["bytes"] for f in pm["files"]))
         models.append(m)
+    cloud = {m["id"] for m in models if m["cloud"]}
     app = {
         "models": models,
-        "plans": [{**p, "models": [m for m in p["models"] if m in CLOUD_MODELS]} for p in plans["plans"]],
+        "plans": [{**p, "models": [m for m in p["models"] if m in cloud]} for p in plans["plans"]],
         "default_plan": plans["default"],
         "palette": {"names": list(palette.NAMES), "rgb": [list(c) for c in palette.RGB]},
         "lang": {"GRID": lang.GRID, "PAD": lang.PAD, "BOS": lang.BOS, "EOS": lang.EOS, "NAMES": lang.NAMES,
@@ -120,14 +145,18 @@ def export_static():
 
 
 def main():
-    indexes = {mid: export_weights(mid) for mid in CLOUD_MODELS}
+    check_runtime()
+    indexes = {mid: export_weights(mid) for mid in VECTOR_MODELS}
+    pros = {mid: pm for mid in PRO_MODELS if (pm := export_pro(mid))}
     export_font()
-    export_app(indexes)
+    export_app(indexes, pros)
     shutil.copyfile(ROOT / "web" / "style.css", OUT / "style.css")    # one stylesheet for both apps
     export_static()
-    for mid, ix in indexes.items():
-        t = ix["training"]
-        print(f"{mid}: {ix['elements'] * 2 / 1e6:.1f} MB, {t['epochs_completed']} epochs + "
+    sizes = {**{mid: ix["elements"] * 2 for mid, ix in indexes.items()},
+             **{mid: sum(f["bytes"] for f in pm["files"]) for mid, pm in pros.items()}}
+    for mid, info in {**indexes, **pros}.items():
+        t = info["training"]
+        print(f"{mid}: {sizes[mid] / 1e6:.1f} MB, {t['epochs_completed']} epochs + "
               f"{100 * t['epoch_progress']:.1f}%, {t['samples_seen']} samples")
     print(f"wrote {OUT}/weights, {OUT}/data")
 
