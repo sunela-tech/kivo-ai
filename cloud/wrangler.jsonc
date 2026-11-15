@@ -1,0 +1,28 @@
+// INKOS Cloud on Cloudflare Workers. Deployment steps are in README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "inkos",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+
+  // The page and the drawing engine are bundled into the script (src/static.gen.js,
+  // made by build.py). The model weights are in KV and are only handed to
+  // users whose plan includes the model.
+  "kv_namespaces": [
+    { "binding": "WEIGHTS", "id": "131b9522e7ef49f19c710c259310f3ef" }
+  ],
+
+  // Daily image counts, projects and the gallery.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "inkos", "database_id": "95af8fed-d666-45fe-a999-4df348fba9ae", "migrations_dir": "migrations" }
+  ],
+
+  "vars": {
+    // Public by design: identifies the Clerk instance. No Clerk secret key is needed,
+    // because session tokens are checked against the instance's public signing keys.
+    "CLERK_PUBLISHABLE_KEY": "pk_test_Zml0dGluZy1ib2EtODUyMS5jbGVyay5hY2NvdW50cy5kZXYk"
+  }
+}

@@ -122,6 +122,18 @@ limited.
 
 ![The Plans tab](docs/interface-plans.png)
 
+## INKOS Cloud
+
+INKOS 1 and INKOS 1.1 also run as a web app on Cloudflare Workers, with
+sign-in and the three plans sold through Clerk Billing:
+**https://inkos.playcore.workers.dev** (development instance, test-mode
+payments). The models run in the visitor's browser, through a JavaScript port
+that reproduces the PyTorch tokens exactly. The Worker checks the Clerk
+session, applies the plan, counts images and keeps the gallery. Setup,
+architecture and limitations are in [cloud/README.md](cloud/README.md).
+
+![INKOS Cloud drawing a note in the browser](docs/cloud-generate.png)
+
 ## Training
 
 Training and inference are separate programs that only share files:
@@ -424,6 +436,7 @@ inkos/
   hardware.py       hardware checks and benchmark
   server.py         local HTTP server
 web/                interface (index.html, style.css, app.js)
+cloud/              INKOS Cloud: Cloudflare Worker, browser engine, Clerk sign-in and billing
 tests/              test suite (pytest)
 models/inkos1/      installed INKOS 1 weights and their manifest
 models/inkos1_1/    installed INKOS 1.1 weights and their manifest

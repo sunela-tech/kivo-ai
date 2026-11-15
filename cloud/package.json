@@ -1,0 +1,16 @@
+{
+  "name": "inkos-cloud",
+  "private": true,
+  "type": "module",
+  "description": "INKOS Cloud: the INKOS app on Cloudflare Workers with Clerk sign-in and billing",
+  "scripts": {
+    "build": "python3 build.py",
+    "test": "node --test test/engine.test.mjs test/worker.test.mjs",
+    "dev": "wrangler dev",
+    "migrate": "wrangler d1 migrations apply inkos --remote",
+    "deploy": "python3 build.py && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.162.0"
+  }
+}

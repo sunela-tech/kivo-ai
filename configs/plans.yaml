@@ -8,10 +8,16 @@
 #
 # Edit this file to rename plans or change what they include. `price` is
 # only a label shown on the Plans page; leave it null to show nothing.
+#
+# INKOS Cloud (cloud/) uses the same plans, sold through Clerk Billing:
+# `clerk_plan` is the plan's slug in Clerk, and prices are set in Clerk, not
+# here. The cloud app only serves the models it can run in a browser, so the
+# Pro models listed here are ignored there.
 default: basic
 
 plans:
   - id: basic
+    clerk_plan: free_user           # plan slug in Clerk Billing (INKOS Cloud)
     name: Basic
     tagline: Black-and-white notes, lists and simple graphics.
     price: null
@@ -21,6 +27,7 @@ plans:
     projects: 1
 
   - id: plus
+    clerk_plan: user_plus           # plan slug in Clerk Billing (INKOS Cloud)
     name: Plus
     tagline: Adds colour with INKOS 1.1 and the 1024 px size.
     price: null
@@ -30,6 +37,7 @@ plans:
     projects: 10
 
   - id: studio
+    clerk_plan: user_pro           # plan slug in Clerk Billing (INKOS Cloud)
     name: Studio
     tagline: Every model, including both Pro models, without limits.
     price: null
