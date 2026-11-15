@@ -3,7 +3,8 @@
 // Serves the app (bundled into this script), verifies Clerk sign-in, applies the
 // Clerk Billing plan to every request, keeps the daily image count and the
 // gallery in D1, and only hands model weights to users whose plan includes
-// the model. The models themselves run in the user's browser.
+// the model. The models themselves run in the user's browser (the Pro models
+// through onnxruntime-web, served from /ort/).
 
 import APP from '../public/data/app.json' with { type: 'json' };
 import { AuthError, issuerFromPublishableKey, userPlans, verifySessionToken } from './auth.js';
@@ -166,6 +167,8 @@ async function api(request, env, url) {
       model: model.id, model_name: model.name, size: info.w, prompt: String(meta.prompt || '').slice(0, 2000),
       seed: Number.isFinite(meta.seed) ? meta.seed : null, temperature: Number.isFinite(meta.temperature) ? meta.temperature : null,
       tokens: Number.isFinite(meta.tokens) ? meta.tokens : null, complete: !!meta.complete, seconds: Number.isFinite(meta.seconds) ? meta.seconds : null,
+      steps: Number.isFinite(meta.steps) ? meta.steps : null, guidance: Number.isFinite(meta.guidance) ? meta.guidance : null,
+      backend: ['webgpu', 'wasm'].includes(meta.backend) ? meta.backend : null,
       colors: meta.colors && typeof meta.colors === 'object' ? meta.colors : null, bytes: png.length,
       weights: model.training ? { epochs_completed: model.training.epochs_completed, epoch_progress: model.training.epoch_progress,
         samples_seen: model.training.samples_seen, target_epochs: model.target_epochs } : null,
@@ -194,23 +197,54 @@ async function api(request, env, url) {
   throw new HttpError(404, 'not found');
 }
 
-async function weights(request, env, url) {
-  const m = /^\/weights\/([a-z0-9_]+)\.(json|bin)$/.exec(url.pathname);
+// A file in Workers KV. A value holds at most 25 MiB, so larger files are
+// stored in parts: <key> holds part 0 with metadata {size, parts}, and
+// <key>#1, <key>#2, ... the rest. They are streamed back as one body.
+async function kvFile(env, ctx, key) {
+  const { value, metadata } = await env.WEIGHTS.getWithMetadata(key, { type: 'stream' });
+  if (!value) return null;
+  const size = metadata && metadata.size, parts = (metadata && metadata.parts) || 1;
+  if (!size || typeof FixedLengthStream === 'undefined') {
+    if (parts > 1) throw new HttpError(500, 'this runtime cannot join stored parts');
+    return value;
+  }
+  const fixed = new FixedLengthStream(size);                  // sends Content-Length, so the page can show progress
+  const pump = (async () => {
+    await value.pipeTo(fixed.writable, { preventClose: parts > 1 });
+    for (let k = 1; k < parts; k++) {
+      const next = await env.WEIGHTS.get(`${key}#${k}`, { type: 'stream' });
+      if (!next) throw new Error(`part ${k} of ${key} is missing`);
+      await next.pipeTo(fixed.writable, { preventClose: k < parts - 1 });
+    }
+  })().catch(async (e) => { console.error(e); try { await fixed.writable.abort(e); } catch { /* already closed */ } });
+  if (ctx && ctx.waitUntil) ctx.waitUntil(pump);
+  return fixed.readable;
+}
+
+const FILE_TYPES = { json: 'application/json', bin: 'application/octet-stream', onnx: 'application/octet-stream',
+  mjs: 'text/javascript; charset=utf-8', wasm: 'application/wasm' };
+
+async function weights(request, env, ctx, url) {
+  // /weights/<model>.json|bin  (INKOS 1 family)   /weights/<model>/<file>  (Pro: ONNX graphs + manifest)
+  const m = /^\/weights\/([a-z0-9_]+)(?:\.(json|bin)|\/(manifest\.json|[a-z]+\.onnx))$/.exec(url.pathname);
   if (!m || request.method !== 'GET') return new Response('not found', { status: 404 });
   const user = await authenticate(request, env);
-  checkModel(user, m[1]);
-  // weights live in Workers KV under weights/<model>.<ext>; metadata.size is the byte length
-  const { value, metadata } = await env.WEIGHTS.getWithMetadata(`weights/${m[1]}.${m[2]}`, { type: 'stream' });
-  if (!value) throw new HttpError(404, 'these weights are not installed on the server');
-  const headers = { 'content-type': m[2] === 'json' ? 'application/json' : 'application/octet-stream',
-    'cache-control': 'private, max-age=86400' };
-  let body = value;
-  if (metadata && metadata.size && typeof FixedLengthStream !== 'undefined') {
-    const fixed = new FixedLengthStream(metadata.size);      // sends Content-Length, so the page can show progress
-    value.pipeTo(fixed.writable);
-    body = fixed.readable;
-  }
-  return new Response(body, { headers });
+  const model = checkModel(user, m[1]);
+  if ((model.engine === 'pro') !== !!m[3]) throw new HttpError(404, 'not found');
+  const key = m[3] ? `weights/${m[1]}/${m[3]}` : `weights/${m[1]}.${m[2]}`;
+  const body = await kvFile(env, ctx, key);
+  if (!body) throw new HttpError(404, 'these weights are not installed on the server');
+  return new Response(body, { headers: { 'content-type': FILE_TYPES[key.split('.').pop()], 'cache-control': 'private, max-age=86400' } });
+}
+
+// onnxruntime-web, which runs the Pro models in the browser. Public: it holds no model.
+async function runtimeFile(request, env, ctx, url) {
+  const m = /^\/ort\/(\d+\.\d+\.\d+)\/(ort[a-z.-]*\.(mjs|wasm))$/.exec(url.pathname);
+  if (!m || request.method !== 'GET') return new Response('not found', { status: 404 });
+  const body = await kvFile(env, ctx, `ort/${m[1]}/${m[2]}`);
+  if (!body) return new Response('not found', { status: 404 });
+  return new Response(body, { headers: { 'content-type': FILE_TYPES[m[3]], 'cache-control': 'public, max-age=31536000, immutable',
+    'x-content-type-options': 'nosniff' } });
 }
 
 function staticFile(request, url) {
@@ -222,11 +256,12 @@ function staticFile(request, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
       if (url.pathname.startsWith('/api/')) return await api(request, env, url);
-      if (url.pathname.startsWith('/weights/')) return await weights(request, env, url);
+      if (url.pathname.startsWith('/weights/')) return await weights(request, env, ctx, url);
+      if (url.pathname.startsWith('/ort/')) return await runtimeFile(request, env, ctx, url);
       return staticFile(request, url);
     } catch (e) {
       if (e instanceof AuthError) return json({ error: e.message, signIn: true }, 401);

@@ -40,6 +40,7 @@ data:
 
 train:
   batch_size: 16                   # raise on a GPU (32-64 fits in 12 GB)
+  cpu_bf16: true                   # bfloat16 autocast on CPUs with AMX / AVX-512 BF16 (about 3x faster)
   lr: 2.0e-4
   min_lr: 2.0e-5
   warmup_steps: 200

@@ -65,6 +65,16 @@ def pid_alive(pid) -> bool:
         return False
 
 
+def cpu_has_fast_bf16() -> bool:
+    """True on CPUs with native bfloat16 arithmetic (Intel AMX or AVX-512 BF16)."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            flags = f.read()
+    except OSError:
+        return False
+    return ("amx_bf16" in flags or "avx512_bf16" in flags) and torch.backends.mkldnn.is_available()
+
+
 def pick_device(name: str | None = None) -> torch.device:
     if name and name != "auto":
         return torch.device(name)
@@ -100,6 +110,10 @@ class Trainer:
         self.amp_dtype = None
         if self.device.type == "cuda":
             self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        elif self.device.type == "cpu" and self.t.get("cpu_bf16") and cpu_has_fast_bf16():
+            # CPUs with AMX / AVX-512 BF16 run convolutions and matmuls about 3x faster in
+            # bfloat16; weights and optimiser state stay float32 (autocast)
+            self.amp_dtype = torch.bfloat16
         self.scaler = torch.amp.GradScaler("cuda") if self.amp_dtype == torch.float16 else None
 
         self.dataset_size = task.dataset_size
@@ -308,7 +322,8 @@ class Trainer:
             "best_val_loss": self.best_val, "lr": self.lr_now(),
             "samples_per_sec": round(self.speed, 2) if self.speed else None,
             "eta_seconds_to_target": eta, "train_seconds": round(self.train_seconds, 1),
-            "device": str(self.device), "params": self.params, "fingerprint": self.fingerprint,
+            "device": str(self.device) + (f" ({str(self.amp_dtype).split('.')[-1]})" if self.amp_dtype else ""),
+            "params": self.params, "fingerprint": self.fingerprint,
             "pid": os.getpid(), "started_at": self.started_at,
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "previews": self.previews,
             "initialised_from": self.init_info,
@@ -349,7 +364,8 @@ class Trainer:
         t_start = time.time()
         steps_this_run = 0
         last_ckpt = last_state = time.time()
-        self.log(f"training {self.cfg.name} on {self.device}: {self.params / 1e6:.2f} M parameters, "
+        precision = f" in {str(self.amp_dtype).split('.')[-1]} autocast" if self.amp_dtype else ""
+        self.log(f"training {self.cfg.name} on {self.device}{precision}: {self.params / 1e6:.2f} M parameters, "
                  f"{self.dataset_size} training samples, {self.steps_per_epoch} steps per epoch, "
                  f"target {self.target_epochs} epochs")
         self.write_state("training")
