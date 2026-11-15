@@ -70,6 +70,23 @@ untrained model refuses to generate instead of returning a placeholder.
 
 ## Quick start
 
+The easiest way: double-click the launcher for your system. It needs Python
+3.10 or newer from python.org. The first run creates a private environment
+in `.venv/` and installs the requirements, PyTorch included, which takes a
+few minutes. After that it starts at once and opens the app in your browser.
+
+| System | Launcher |
+| --- | --- |
+| macOS | `start.command` (the first time, right-click it and choose Open) |
+| Windows | `start.bat` |
+| Linux | `start.sh` |
+
+Leave the launcher's window open while you use INKOS; closing it stops the
+app. A zip of the app without git (`INKOS-<version>.zip`) is made with
+`python tools/package_python_app.py`.
+
+By hand:
+
 ```bash
 pip install -r requirements.txt        # torch, numpy, pillow, pyyaml
 ```
@@ -79,7 +96,7 @@ python -m inkos doctor                 # hardware check for all four models
 ```
 
 ```bash
-python -m inkos serve                  # http://localhost:8765
+python -m inkos serve --open           # http://localhost:8765
 ```
 
 INKOS 1 and INKOS 1.1 ship with small trained weight files in `models/`, so

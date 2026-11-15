@@ -436,10 +436,22 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, device: str | None = 
     return srv
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, device: str | None = None):
-    srv = make_server(host, port, device)
+def serve(host: str = "127.0.0.1", port: int = 8765, device: str | None = None, open_browser: bool = False):
     shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
-    print(f"INKOS {__version__} local server: http://{shown}:{port}/   (Ctrl-C to stop)")
+    url = f"http://{shown}:{port}/"
+    try:
+        srv = make_server(host, port, device)
+    except OSError as e:
+        if open_browser and e.errno in (48, 98, 10048):          # address in use: INKOS is probably running already
+            import webbrowser
+            print(f"port {port} is in use, so INKOS is probably running already; opening {url}")
+            webbrowser.open(url)
+            return
+        raise
+    print(f"INKOS {__version__} local server: {url}   (Ctrl-C to stop)")
+    if open_browser:
+        import webbrowser
+        threading.Timer(0.8, webbrowser.open, [url]).start()
     if host == "0.0.0.0":
         print("listening on all interfaces: other devices on your network can reach this server")
     for mid in model_ids():

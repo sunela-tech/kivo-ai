@@ -177,7 +177,7 @@ def cmd_generate(a):
 
 def cmd_serve(a):
     from . import server
-    server.serve(host=a.host, port=a.port)
+    server.serve(host=a.host, port=a.port, open_browser=a.open)
 
 
 def cmd_doctor(a):
@@ -257,6 +257,7 @@ def main(argv=None):
     v = sub.add_parser("serve", help="start the local server and HTML interface")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8765)
+    v.add_argument("--open", action="store_true", help="open the interface in the default browser")
     v.set_defaults(fn=cmd_serve)
 
     pl = sub.add_parser("plan", help="show the three plans, or switch the active one")

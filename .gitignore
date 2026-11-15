@@ -23,3 +23,6 @@ venv/
 /models/*
 !/models/inkos1/
 !/models/inkos1_1/
+
+# packaged downloads (tools/package_python_app.py)
+/dist/
