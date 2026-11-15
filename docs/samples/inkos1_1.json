@@ -1,0 +1,107 @@
+{
+  "weights": {
+    "source": "installed",
+    "epochs_completed": 0,
+    "epoch_progress": 0.2118,
+    "samples_seen": 69888,
+    "target_epochs": 10000
+  },
+  "samples": [
+    {
+      "prompt": "blue note Groceries: milk; eggs; bread; coffee",
+      "seed": 100,
+      "tokens": 49,
+      "seconds": 0.29
+    },
+    {
+      "prompt": "black and red todo Weekend: [x] Pay rent; Call Anna; Buy stamps; [x] Water plants",
+      "seed": 101,
+      "tokens": 93,
+      "seconds": 0.51
+    },
+    {
+      "prompt": "green handwritten journal 2026-11-15: Woke up early and went for a walk before breakfast.",
+      "seed": 102,
+      "tokens": 25,
+      "seconds": 0.21
+    },
+    {
+      "prompt": "red log: 09:00 boot ok; 09:05 sync started; 09:20 sync done",
+      "seed": 103,
+      "tokens": 64,
+      "seconds": 0.4
+    },
+    {
+      "prompt": "colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9",
+      "seed": 104,
+      "tokens": 124,
+      "seconds": 0.47
+    },
+    {
+      "prompt": "colorful pie chart: Rent 50, Food 30, Fun 20",
+      "seed": 105,
+      "tokens": 54,
+      "seconds": 0.23
+    },
+    {
+      "prompt": "colorful flowchart: Start -> Check -> Save -> Done",
+      "seed": 106,
+      "tokens": 155,
+      "seconds": 0.55
+    },
+    {
+      "prompt": "colorful stack: UI; API; DB",
+      "seed": 107,
+      "tokens": 64,
+      "seconds": 0.33
+    },
+    {
+      "prompt": "black and blue mind map: Project; Design; Build; Test",
+      "seed": 108,
+      "tokens": 65,
+      "seconds": 0.4
+    },
+    {
+      "prompt": "colorful tree: Root; A; B; C",
+      "seed": 109,
+      "tokens": 89,
+      "seconds": 0.43
+    },
+    {
+      "prompt": "blue timeline: 2020 Start; 2022 Launch; 2024 Growth",
+      "seed": 110,
+      "tokens": 77,
+      "seconds": 0.39
+    },
+    {
+      "prompt": "colorful table: Item, Qty; Apples, 3; Pears, 5",
+      "seed": 111,
+      "tokens": 83,
+      "seconds": 0.38
+    },
+    {
+      "prompt": "red heart",
+      "seed": 112,
+      "tokens": 27,
+      "seconds": 0.17
+    },
+    {
+      "prompt": "yellow sun",
+      "seed": 113,
+      "tokens": 69,
+      "seconds": 0.29
+    },
+    {
+      "prompt": "colorful three stars",
+      "seed": 114,
+      "tokens": 60,
+      "seconds": 0.28
+    },
+    {
+      "prompt": "green sketch of a tree",
+      "seed": 115,
+      "tokens": 95,
+      "seconds": 0.42
+    }
+  ]
+}

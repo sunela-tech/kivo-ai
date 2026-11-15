@@ -10,7 +10,7 @@ black-and-white HTML interface with three usage plans.
 | Output | black and white, 1 bit | black and white, 1 bit | six colours | six colours |
 | Made for | notes, journals, logs, lists, tables, icons, sketches, diagrams, charts | manga characters, comic panels and pages, line art, environments | the INKOS 1 subjects in colour | the INKOS 1 Pro subjects in flat colour |
 | How it draws | a transformer writes a vector drawing program; a rasteriser renders it | a diffusion U-Net denoises a bitmap; a learned refiner upscales it | as INKOS 1, plus pen-colour tokens | as INKOS 1 Pro, one channel per colour |
-| Parameters | 6.66 million | 57.55 million | 6.66 million | 57.90 million |
+| Parameters | 6.66 million | 57.55 million | 6.66 million | 57.69 million |
 | Sizes | 256, 512, 1024 | 256 native, 512 and 1024 refined | 256, 512, 1024 | 256 native, 512 and 1024 refined |
 | Training target | 10,000 epochs | 20,000 epochs | 10,000 epochs | 20,000 epochs |
 | Trains on | a CPU or any GPU | a GPU (8 GB or more) | a CPU or any GPU | a GPU (8 GB or more) |

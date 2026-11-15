@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "model": "inkos1_1",
+  "name": "INKOS 1.1",
+  "architecture": "inkscript-transformer",
+  "fingerprint": "bf60c6c563e1",
+  "config": {
+    "id": "inkos1_1",
+    "name": "INKOS 1.1",
+    "architecture": "inkscript-transformer",
+    "summary": "INKOS 1 with colour. Writes the same kind of drawing program, plus pen colours, and renders it in the six-colour E-Ink palette at any size. Small, fast, runs on a CPU.",
+    "specialties": [
+      "colour notes and lists",
+      "colour charts",
+      "colour diagrams",
+      "coloured icons and symbols",
+      "sketches"
+    ],
+    "palette": "eink6",
+    "target_epochs": 10000,
+    "model": {
+      "d_model": 256,
+      "n_layers": 8,
+      "n_heads": 8,
+      "d_ff": 1024,
+      "max_prompt": 256,
+      "max_program": 320,
+      "dropout": 0.0,
+      "color": true
+    },
+    "data": {
+      "count": 330000,
+      "val_count": 4000,
+      "shard_size": 20000,
+      "seed": 3,
+      "mix": {
+        "notes": 0.24,
+        "charts": 0.14,
+        "diagrams": 0.14,
+        "symbols": 0.12,
+        "icons": 0.14,
+        "sketches": 0.22
+      }
+    },
+    "train": {
+      "init_from": "inkos1",
+      "batch_size": 32,
+      "lr": 0.0004,
+      "min_lr": 4e-05,
+      "warmup_steps": 300,
+      "schedule_epochs": null,
+      "weight_decay": 0.02,
+      "betas": [
+        0.9,
+        0.98
+      ],
+      "grad_clip": 1.0,
+      "ema_decay": 0.999,
+      "log_every": 20,
+      "val_every_steps": 750,
+      "val_batches": 40,
+      "checkpoint_minutes": 10,
+      "keep_checkpoints": 3,
+      "seed": 3
+    },
+    "sample": {
+      "temperature": 0.7,
+      "top_p": 0.95
+    },
+    "inference": {
+      "sizes": [
+        256,
+        512,
+        1024
+      ],
+      "default_size": 512
+    },
+    "preview_prompts": [
+      "blue note Groceries: milk; eggs; bread; coffee",
+      "black and red todo: [x] Pay rent; Call Anna; Buy stamps",
+      "green handwritten journal 2026-11-15: Woke up early and went for a walk before breakfast.",
+      "colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9",
+      "colorful pie chart: Rent 50, Food 30, Fun 20",
+      "colorful flowchart: Start -> Check -> Done",
+      "colorful stack: UI; API; DB",
+      "black and blue mind map: Project; Design; Build; Test",
+      "red heart",
+      "yellow sun",
+      "colorful three stars",
+      "green sketch of a tree"
+    ]
+  },
+  "params": 6663936,
+  "dtype": "float16",
+  "file": "weights.pt",
+  "bytes": 13490877,
+  "sha256": "61b5707e4ba2507bfca6e6816224f529a6ec5aee26773511d9876634a72141cc",
+  "training": {
+    "model_id": "inkos1_1",
+    "fingerprint": "bf60c6c563e1",
+    "epochs_completed": 0,
+    "epoch_progress": 0.2118,
+    "global_step": 2184,
+    "samples_seen": 69888,
+    "dataset_size": 330000,
+    "target_epochs": 10000,
+    "train_seconds": 2489.1,
+    "val": {
+      "token_acc": 0.6509311534464359,
+      "pointer_acc": 0.994689303636551,
+      "loss": 1.282874695956707,
+      "at_step": 1500,
+      "at_epoch": 0.1454
+    },
+    "saved_at": "2026-11-15T10:17:53",
+    "initialised_from": {
+      "model": "inkos1",
+      "name": "INKOS 1",
+      "epochs_completed": 1,
+      "samples_seen": 330000
+    }
+  },
+  "source_checkpoint": "runs/inkos1_1/checkpoints/last.pt",
+  "exported_at": "2026-11-15T10:27:00",
+  "inkos_version": "0.1.0",
+  "torch_version": "2.15.0+cu132"
+}
