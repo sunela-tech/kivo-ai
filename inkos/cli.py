@@ -34,6 +34,10 @@ def _fmt_duration(sec) -> str:
     return f"{sec:.0f} seconds"
 
 
+def _epochs(n) -> str:
+    return f"{n} epoch" + ("" if n == 1 else "s")
+
+
 def cmd_data(a):
     cfg = load_config(a.model, a.set)
     if a.action == "prepare":
@@ -105,7 +109,7 @@ def cmd_status(a):
         d = s["dataset"]
         print(f"  dataset          " + (f"{d['train_count']:,} training samples" if d else "not prepared"))
         w = s["weights"]
-        print(f"  inference        " + (f"{w['source']} ({w['epochs_completed']} epochs, {w['samples_seen']:,} samples)" if w else "no weights available"))
+        print(f"  inference        " + (f"{w['source']} weights ({_epochs(w['epochs_completed'])}, {w['samples_seen']:,} samples)" if w else "no weights available"))
 
 
 def cmd_eval(a):
@@ -124,13 +128,16 @@ def cmd_generate(a):
     from .engine import Engine
     eng = Engine()
     t0 = time.time()
-    res = eng.generate(a.model, a.prompt, size=a.size, seed=a.seed, steps=a.steps, guidance=a.guidance,
-                       temperature=a.temperature, progress=lambda p: print(f"\r  {p['stage']} {100 * p['fraction']:.0f}%   ", end="", file=sys.stderr))
+    try:
+        res = eng.generate(a.model, a.prompt, size=a.size, seed=a.seed, steps=a.steps, guidance=a.guidance,
+                           temperature=a.temperature, progress=lambda p: print(f"\r  {p['stage']} {100 * p['fraction']:.0f}%   ", end="", file=sys.stderr))
+    except (RuntimeError, ValueError) as e:      # e.g. a model that has never been trained
+        sys.exit(str(e))
     print(file=sys.stderr)
     from . import bitmap
     out = bitmap.save_png(res["image"], a.out)
     print(f"wrote {out}  ({a.size}x{a.size}, seed {res['meta']['seed']}, {time.time() - t0:.1f} s, "
-          f"weights: {res['meta']['weights']['source']} at {res['meta']['weights']['epochs_completed']} epochs)")
+          f"weights: {res['meta']['weights']['source']}, {_epochs(res['meta']['weights']['epochs_completed'])} trained)")
 
 
 def cmd_serve(a):
