@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
+<title>INKOS</title>
+<style>
+/*STYLE*/
+.top { align-items: center; }
+.lead { font-family: var(--serif); font-size: 18px; line-height: 1.45; margin-bottom: 22px; max-width: 70ch; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>INKOS</h1>
+    <p>Offline E-Ink images</p>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Sections" id="tabs">
+    <button role="tab" id="tab-generate" data-view="generate" aria-selected="true">Generate</button>
+    <button role="tab" id="tab-gallery" data-view="gallery" aria-selected="false">Gallery</button>
+    <button role="tab" id="tab-models" data-view="models" aria-selected="false">Models</button>
+  </nav>
+</header>
+
+<p class="banner" id="banner" hidden role="alert"></p>
+
+<main>
+  <section class="view" id="view-generate" role="tabpanel" aria-labelledby="tab-generate">
+    <div class="split">
+      <form class="pane" id="gen-form" autocomplete="off">
+        <fieldset>
+          <legend>Model</legend>
+          <div class="model-picker" id="model-picker" role="radiogroup" aria-label="Model"></div>
+        </fieldset>
+        <fieldset>
+          <legend><label for="prompt">Prompt</label></legend>
+          <textarea id="prompt" rows="4" maxlength="2000" spellcheck="false" placeholder="Describe the image. One item per line also works."></textarea>
+          <p class="hint" id="prompt-hint"></p>
+          <div class="chips" id="examples" aria-label="Example prompts"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Size</legend>
+          <div class="segmented" id="size-picker" role="radiogroup" aria-label="Image size in pixels"></div>
+        </fieldset>
+        <details class="more">
+          <summary>More settings</summary>
+          <div class="grid2">
+            <label>Seed <input type="number" id="seed" min="0" max="2147483647" inputmode="numeric" placeholder="random"></label>
+            <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.05" inputmode="decimal"></label>
+            <label>Save to project <select id="project"></select></label>
+            <label>New project <span class="row"><input type="text" id="new-project" maxlength="40" placeholder="name"><button type="button" id="add-project" class="small">Add</button></span></label>
+          </div>
+        </details>
+        <button type="submit" class="primary" id="generate">Generate</button>
+        <div class="progress" id="progress" hidden>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><span id="progress-fill"></span></div>
+          <p id="progress-text" aria-live="polite"></p>
+        </div>
+      </form>
+      <div class="pane result">
+        <div class="frame" id="frame">
+          <p class="empty" id="frame-empty">The image appears here.<br>Pure black and white, or six flat E-Ink colours.</p>
+          <img id="result-img" alt="" hidden>
+        </div>
+        <div id="result-info" hidden>
+          <p class="notice" id="result-notice" hidden></p>
+          <dl class="facts" id="result-facts"></dl>
+          <div class="actions">
+            <a class="button" id="download" download>Download PNG</a>
+            <button type="button" id="regenerate">Regenerate</button>
+            <button type="button" id="same-seed">Same seed</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-gallery" role="tabpanel" aria-labelledby="tab-gallery" hidden>
+    <div class="toolbar">
+      <label>Project <select id="gallery-project"></select></label>
+      <span class="count" id="gallery-count"></span>
+    </div>
+    <p class="empty block" id="gallery-empty" hidden>No images in this project yet. Everything you generate is kept here, on this computer.</p>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="detail" id="detail" hidden>
+      <div class="frame"><img id="detail-img" alt=""></div>
+      <div>
+        <dl class="facts" id="detail-facts"></dl>
+        <div class="actions">
+          <a class="button" id="detail-download" download>Download PNG</a>
+          <button type="button" id="detail-reuse">Use this prompt</button>
+          <button type="button" id="detail-delete">Delete</button>
+          <button type="button" id="detail-close">Close</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-models" role="tabpanel" aria-labelledby="tab-models" hidden>
+    <p class="lead">Both models are inside this file and run on this computer, without internet. The numbers below are the real training record of the weights included.</p>
+    <div class="cards" id="model-cards"></div>
+  </section>
+</main>
+
+<footer>
+  <span id="foot">INKOS Desktop</span>
+  <span>Runs offline. Nothing leaves this computer.</span>
+</footer>
+
+<!--DATA-->
+<script>
+/*APP*/
+</script>
+</body>
+</html>

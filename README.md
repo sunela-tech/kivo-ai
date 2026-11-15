@@ -122,6 +122,33 @@ limited.
 
 ![The Plans tab](docs/interface-plans.png)
 
+## INKOS Desktop (one HTML file)
+
+[`desktop/dist/INKOS.html`](desktop/dist/INKOS.html) is the whole app in one
+36 MB file. Double-click it to open it in Chrome, Edge, Firefox or Safari on
+macOS, Windows or Linux. It needs no installation, no Python, no server and
+no internet.
+
+- **Models:** INKOS 1 and INKOS 1.1, with their trained weights inside the
+  file.
+- **Output:** 256, 512 or 1024 px PNGs, pure black and white or six-colour.
+- **Gallery:** with projects, kept in the browser on this computer.
+- **Speed:** about 1–2 seconds per picture on a laptop.
+
+The engine is the same JavaScript as INKOS Cloud, which reproduces the
+PyTorch tokens exactly. The two Pro models are not included: they are
+untrained and far too heavy for a browser.
+
+Rebuild it after training or exporting new weights:
+
+```bash
+python desktop/build.py
+```
+
+The build needs `cd cloud && npm install` once, for esbuild.
+
+![INKOS Desktop drawing a colour flowchart offline](docs/desktop-generate.png)
+
 ## INKOS Cloud
 
 INKOS 1 and INKOS 1.1 also run as a web app on Cloudflare Workers, with
@@ -437,6 +464,7 @@ inkos/
   server.py         local HTTP server
 web/                interface (index.html, style.css, app.js)
 cloud/              INKOS Cloud: Cloudflare Worker, browser engine, Clerk sign-in and billing
+desktop/            INKOS Desktop: build script and source for the single-file HTML app
 tests/              test suite (pytest)
 models/inkos1/      installed INKOS 1 weights and their manifest
 models/inkos1_1/    installed INKOS 1.1 weights and their manifest
