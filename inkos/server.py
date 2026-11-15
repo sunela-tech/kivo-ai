@@ -204,7 +204,7 @@ def stop_training(model_id: str) -> dict:
     return {"stopping": True, "pid": st["pid"]}
 
 
-def log_tail(model_id: str, lines: int = 14) -> list[str]:
+def log_tail(model_id: str, lines: int = 8) -> list[str]:
     f = paths.run_dir(model_id) / "train.log"
     try:
         with open(f, "rb") as fh:

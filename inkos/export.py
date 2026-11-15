@@ -30,6 +30,13 @@ def latest_checkpoint(model_id: str) -> Path | None:
     return p if p.exists() else None
 
 
+def _relative(p: Path) -> str:
+    try:
+        return str(p.resolve().relative_to(paths.ROOT.resolve()))
+    except ValueError:
+        return p.name
+
+
 def export(cfg: Config, checkpoint: str | None = None, half: bool = True) -> dict:
     src = Path(checkpoint) if checkpoint else latest_checkpoint(cfg.id)
     if not src or not src.exists():
@@ -51,7 +58,7 @@ def export(cfg: Config, checkpoint: str | None = None, half: bool = True) -> dic
         "params": int(n_params), "dtype": "float16" if half else "float32",
         "file": "weights.pt", "bytes": (out / "weights.pt").stat().st_size, "sha256": digest,
         "training": checkpoint_summary(ck, target_epochs=int(cfg.target_epochs)),
-        "source_checkpoint": str(src), "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "source_checkpoint": _relative(src), "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "inkos_version": __version__, "torch_version": torch.__version__,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))

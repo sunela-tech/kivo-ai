@@ -94,7 +94,7 @@ def memory_estimate(cfg: Config, params: int) -> dict:
         act = 2 * sum(c * g / 4 ** i for i, c in enumerate(m.channels)) * 4 * 12 / 1e6       # two guided branches
         tile = m.refiner_channels * 6 * 288 * 288 * 4 * 4 / 1e6
         infer = {str(s): round(w + act + (0 if s <= m.base_resolution else tile)) for s in cfg.inference.sizes}
-        train = round(w * 4 + int(cfg.train.batch_size) * 330)
+        train = round(w * 4 + int(cfg.train.batch_size) * 250)     # measured: 4.9 GB at batch 16 on CPU
     return {"weights_mb": round(w, 1), "inference_mb": infer, "training_mb": train,
             "training_batch_size": int(cfg.train.batch_size)}
 

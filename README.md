@@ -177,6 +177,8 @@ with real ones.
 `python -m inkos serve` starts a local server (standard library only) and the
 HTML interface in `web/`:
 
+![The Generate tab with a to-do list drawn by INKOS 1](docs/interface-generate.png)
+
 * **Generate**: model selector with each model's real training state, prompt
   box with example prompts, size selector, optional seed and sampling
   settings, a progress bar driven by the actual sampler, preview, PNG

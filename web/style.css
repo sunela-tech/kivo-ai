@@ -173,7 +173,7 @@ ul.plain li b { font: 700 12px var(--mono); text-transform: uppercase; display: 
 .chart text { font: 11px var(--mono); fill: #000; }
 .previews { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
 .previews img { width: 100%; aspect-ratio: 1 / 1; display: block; border: var(--thin); image-rendering: pixelated; }
-pre.log { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+pre.log { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .inline { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .inline label { width: 150px; }
 

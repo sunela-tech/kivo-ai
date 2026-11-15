@@ -1,0 +1,107 @@
+{
+  "weights": {
+    "source": "installed",
+    "epochs_completed": 1,
+    "epoch_progress": 0.0,
+    "samples_seen": 330000,
+    "target_epochs": 10000
+  },
+  "samples": [
+    {
+      "prompt": "note Groceries: milk; eggs; bread; coffee",
+      "seed": 100,
+      "tokens": 48,
+      "seconds": 0.16
+    },
+    {
+      "prompt": "todo Weekend: [x] Pay rent; Call Anna; Buy stamps; [x] Water plants",
+      "seed": 101,
+      "tokens": 84,
+      "seconds": 0.27
+    },
+    {
+      "prompt": "handwritten journal 2026-11-14: Woke up early and went for a walk before breakfast. The weather was cold but clear all day.",
+      "seed": 102,
+      "tokens": 28,
+      "seconds": 0.11
+    },
+    {
+      "prompt": "log: 09:00 boot ok; 09:05 sync started; 09:20 sync done; 09:45 backup complete",
+      "seed": 103,
+      "tokens": 85,
+      "seconds": 0.27
+    },
+    {
+      "prompt": "table: Item, Qty; Apples, 3; Pears, 5; Plums, 12",
+      "seed": 104,
+      "tokens": 97,
+      "seconds": 0.31
+    },
+    {
+      "prompt": "sign: Back in 5 minutes",
+      "seed": 105,
+      "tokens": 32,
+      "seconds": 0.1
+    },
+    {
+      "prompt": "bar chart: Mon 3, Tue 7, Wed 5, Thu 9",
+      "seed": 106,
+      "tokens": 96,
+      "seconds": 0.29
+    },
+    {
+      "prompt": "pie chart: Rent 50, Food 30, Fun 20",
+      "seed": 107,
+      "tokens": 48,
+      "seconds": 0.16
+    },
+    {
+      "prompt": "flowchart: Start -> Check -> Save -> Done",
+      "seed": 108,
+      "tokens": 96,
+      "seconds": 0.27
+    },
+    {
+      "prompt": "mind map: Project; Design; Build; Test; Launch",
+      "seed": 109,
+      "tokens": 71,
+      "seconds": 0.2
+    },
+    {
+      "prompt": "timeline: 2020 Start; 2022 Launch; 2024 Growth",
+      "seed": 110,
+      "tokens": 76,
+      "seconds": 0.22
+    },
+    {
+      "prompt": "schedule: 09:00 Standup; 10:30 Review; 12:00 Lunch",
+      "seed": 111,
+      "tokens": 68,
+      "seconds": 0.2
+    },
+    {
+      "prompt": "house icon",
+      "seed": 112,
+      "tokens": 25,
+      "seconds": 0.08
+    },
+    {
+      "prompt": "filled star",
+      "seed": 113,
+      "tokens": 20,
+      "seconds": 0.08
+    },
+    {
+      "prompt": "sketch of a cat",
+      "seed": 114,
+      "tokens": 132,
+      "seconds": 0.37
+    },
+    {
+      "prompt": "clock at 3:40",
+      "seed": 115,
+      "tokens": 42,
+      "seconds": 0.13
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "format": 1,
+  "model": "inkos1",
+  "name": "INKOS 1",
+  "architecture": "inkscript-transformer",
+  "fingerprint": "a3b180afe17d",
+  "config": {
+    "id": "inkos1",
+    "name": "INKOS 1",
+    "architecture": "inkscript-transformer",
+    "summary": "Writes a short drawing program (strokes, shapes, text) that is rasterised to pure black and white at any size. Small, fast, runs on a CPU.",
+    "specialties": [
+      "notes and journals",
+      "logs and lists",
+      "icons and symbols",
+      "sketches",
+      "diagrams",
+      "charts"
+    ],
+    "target_epochs": 10000,
+    "model": {
+      "d_model": 256,
+      "n_layers": 8,
+      "n_heads": 8,
+      "d_ff": 1024,
+      "max_prompt": 256,
+      "max_program": 320,
+      "dropout": 0.0
+    },
+    "data": {
+      "count": 330000,
+      "val_count": 4000,
+      "shard_size": 20000,
+      "seed": 1,
+      "mix": {
+        "notes": 0.22,
+        "charts": 0.1,
+        "diagrams": 0.1,
+        "symbols": 0.08,
+        "icons": 0.17,
+        "sketches": 0.33
+      }
+    },
+    "train": {
+      "batch_size": 32,
+      "lr": 0.0006,
+      "min_lr": 6e-05,
+      "warmup_steps": 400,
+      "schedule_epochs": null,
+      "weight_decay": 0.02,
+      "betas": [
+        0.9,
+        0.98
+      ],
+      "grad_clip": 1.0,
+      "ema_decay": 0.999,
+      "log_every": 20,
+      "val_every_steps": 1500,
+      "val_batches": 40,
+      "checkpoint_minutes": 10,
+      "keep_checkpoints": 3,
+      "seed": 1
+    },
+    "sample": {
+      "temperature": 0.7,
+      "top_p": 0.95
+    },
+    "inference": {
+      "sizes": [
+        256,
+        512,
+        1024
+      ],
+      "default_size": 512
+    },
+    "preview_prompts": [
+      "note Groceries: milk; eggs; bread; coffee",
+      "todo: [x] Pay rent; Call Anna; Buy stamps",
+      "handwritten journal 2026-11-14: Woke up early and went for a walk before breakfast.",
+      "log: 09:00 boot ok; 09:05 sync started; 09:20 sync done",
+      "bar chart: 3, 7, 5, 9",
+      "pie chart: Rent 50, Food 30, Fun 20",
+      "flowchart: Start -> Check -> Done",
+      "mind map: Project; Design; Build; Test; Launch",
+      "house icon",
+      "filled star",
+      "sketch of a cat",
+      "sketch of a bicycle"
+    ]
+  },
+  "params": 6662400,
+  "dtype": "float16",
+  "file": "weights.pt",
+  "bytes": 13484733,
+  "sha256": "ab7f732a0f1f790ca0e3be29aa5a8ba9f4352fa3a193e7436cd3d87fca75bee2",
+  "training": {
+    "model_id": "inkos1",
+    "fingerprint": "a3b180afe17d",
+    "epochs_completed": 1,
+    "epoch_progress": 0.0,
+    "global_step": 10313,
+    "samples_seen": 330000,
+    "dataset_size": 330000,
+    "target_epochs": 10000,
+    "train_seconds": 9138.5,
+    "val": {
+      "token_acc": 0.5614337526261807,
+      "pointer_acc": 0.9920410245656968,
+      "loss": 1.6099783778190613,
+      "at_step": 10313,
+      "at_epoch": 1.0
+    },
+    "saved_at": "2026-11-14T23:56:17"
+  },
+  "source_checkpoint": "runs/inkos1/checkpoints/last.pt",
+  "exported_at": "2026-11-15T00:04:00",
+  "inkos_version": "0.1.0",
+  "torch_version": "2.15.0+cu132"
+}
