@@ -20,6 +20,28 @@ Every output pixel is exactly `#000000` or `#FFFFFF`. Files are written as
 ## What is trained and what is not
 
 <!-- STATE:BEGIN -->
+This repository was built and trained on one 4-core CPU with no GPU. The
+numbers below are what was actually completed there, copied from the
+trainer's status files:
+
+| Model | Target | Completed | Weights in this repository |
+| --- | --- | --- | --- |
+| INKOS 1 | 10,000 epochs | **1 complete epoch** (330,000 samples, 10,313 steps, 2.5 hours of training) | installed in `models/inkos1/` |
+| INKOS 1 Pro | 20,000 epochs | **0 complete epochs plus 6% of the next** (3,760 samples, 235 steps, 19.6 minutes of training) | not included |
+
+**INKOS 1** has seen each of its 330,000 training drawings exactly once. Measured on held-out prompts (`python -m inkos eval --model inkos1`): validation loss 1.50, 59% next-token accuracy, 97% pointer accuracy; 89% of freely sampled programs are valid even without the grammar mask; 90% of the requested text strings land on the page exactly.
+
+What that means in practice:
+
+* **Works:** notes, to-do lists, journals, logs, schedules, tables, flowcharts, mind maps and timelines come out right most of the time, with occasional slips such as a wrong checkbox or a label running off the edge (validation loss 0.05 to 0.15 on these families).
+* **Approximate:** charts have the right structure and labels, but bar heights and pie shares do not follow the numbers yet (mean bar-height error 32 of 128 grid units in the evaluation sample).
+* **Not learned yet:** icons and sketches (validation loss 1.88 and 2.88) still give scribbles or the wrong object. These families need many more passes over the data.
+
+![Sixteen prompts drawn by INKOS 1 after one epoch](docs/samples/inkos1.png)
+
+*Sixteen prompts (listed in `docs/samples/inkos1.json`) drawn with the installed one-epoch weights at 512 px. The last row shows the icon and sketch failures.*
+
+**INKOS 1 Pro** was only run long enough to prove the pipeline end to end: 235 steps, 3,760 of its 60,000 training images seen once (6% of one epoch). Its validation loss fell from 1.04 to 0.36, which at this stage only means it has learned how much of a page is ink: its samples are abstract black-and-white blobs, not drawings (edge density 0.031 against 0.110 for real training images). No Pro weights are included. It needs a GPU and a long run before it draws anything recognisable, and it needs real, licensed artwork before it can approach professional manga (see [DATA_LICENSES.md](DATA_LICENSES.md)).
 <!-- STATE:END -->
 
 The epoch counts above are **targets**. The trainer records what was really
@@ -141,11 +163,17 @@ measured throughput and the projected time to the target. For orientation,
 on the 4-core CPU this project was built on:
 
 <!-- BENCH:BEGIN -->
+| Model | Measured training speed | One epoch | Full target |
+| --- | --- | --- | --- |
+| INKOS 1 | 50.57 samples/s (batch 32) | 1.8 hours for 330,000 samples | 10,000 epochs: 2.1 years |
+| INKOS 1 Pro | 4.25 samples/s (batch 16) | 3.9 hours for 60,000 samples | 20,000 epochs: 9.0 years |
 <!-- BENCH:END -->
 
-The targets are sized for a GPU. Lower `target_epochs` or `data.count` in the
-config if you want a run that finishes sooner; the cosine learning-rate
-schedule follows whatever target you set.
+The targets are large: 10,000 epochs of INKOS 1 are 3.3 billion training
+samples and 20,000 epochs of INKOS 1 Pro are 1.2 billion. They are out of
+reach on a CPU; run the benchmark on your GPU for a real estimate. Lower
+`target_epochs` or `data.count` in the config if you want a run that finishes
+sooner; the cosine learning-rate schedule follows whatever target you set.
 
 ## Evaluation
 
