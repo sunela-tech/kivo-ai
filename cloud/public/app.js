@@ -7,7 +7,7 @@ const num = (n) => (n === null || n === undefined ? '-' : Number(n).toLocaleStri
 
 const S = {
   app: null, clerk: null, me: null, model: null, size: null, view: 'welcome', busy: false,
-  last: null, lastReq: null, loaded: new Set(), galleryItems: [], detail: null, urls: [], pricingMounted: false,
+  last: null, lastReq: null, galleryItems: [], detail: null, urls: [], pricingMounted: false,
 };
 
 // Black and white only, no shadows, no motion: suitable for E-Ink.
@@ -131,7 +131,7 @@ async function refreshMe(skipCache = false) {
 
 function renderQuota() {
   const u = S.me.usage, p = plan();
-  $('quota').textContent = `${p.name} plan: ${u.images}${u.limit === null ? '' : ' of ' + u.limit} image${u.limit === 1 ? '' : 's'} today` +
+  $('quota').textContent = `${p.name} plan: ${u.images}${u.limit === null ? '' : ' of ' + u.limit} image${(u.limit ?? u.images) === 1 ? '' : 's'} today` +
     (u.limit === null ? ' (no daily limit)' : '');
 }
 
@@ -216,11 +216,8 @@ async function generate(over = {}) {
   S.lastReq = { model: m.id, prompt, size, temperature, steps, guidance };
   setBusy(true);
   try {
-    if (!S.loaded.has(m.id)) {
-      const r = await engine({ type: 'load', model: m.id, engine: m.engine, token: await token() }, showProgress);
-      if (r.info && r.info.backend) S.backend = r.info.backend;
-      S.loaded.add(m.id);
-    }
+    // the engine keeps loaded models (one Pro model at a time), so this returns at once when it has it
+    await engine({ type: 'load', model: m.id, engine: m.engine, token: await token() }, showProgress);
     showProgress({ stage: 'checking your plan', fraction: 0 });
     const ticket = await api('POST', '/api/generations', { model: m.id, size });
     S.me.usage = ticket.usage;

@@ -79,6 +79,13 @@ def export_pro(mid: str) -> dict | None:
         print(f"{mid}: not installed (python -m inkos export --model {mid}); left out of the cloud app")
         return None
     import pro_onnx
+    installed = json.loads((ROOT / "models" / mid / "manifest.json").read_text())
+    done = OUT / "weights" / mid / "manifest.json"
+    if done.exists():                                    # already exported from these exact weights
+        prev = json.loads(done.read_text())
+        if prev.get("sha256_pt") == installed["sha256"] and all(
+                (done.parent / f["name"]).exists() and (done.parent / f["name"]).stat().st_size == f["bytes"] for f in prev["files"]):
+            return prev
     return pro_onnx.export_graphs(mid)
 
 

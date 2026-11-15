@@ -18,8 +18,8 @@ let fontReady = null;
 
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
 
-async function fetchWithProgress(url, token, onBytes) {
-  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+async function fetchWithProgress(url, token, onBytes, cache = 'default') {
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, cache });
   if (!res.ok) {
     let msg = `could not download ${url} (${res.status})`;
     try { msg = (await res.json()).error || msg; } catch { /* not JSON */ }
@@ -53,7 +53,8 @@ async function openCache() {
 // INKOS 1 Pro / 1.1 Pro: three ONNX graphs, about 115 MB, downloaded once
 // and kept in this browser's cache storage (checked against the manifest's hashes).
 async function loadProModel(msg) {
-  const manifest = JSON.parse(new TextDecoder().decode(await fetchWithProgress(`/weights/${msg.model}/manifest.json`, msg.token, () => {})));
+  // always the current manifest; each file URL carries its hash, so no older copy can be mixed in
+  const manifest = JSON.parse(new TextDecoder().decode(await fetchWithProgress(`/weights/${msg.model}/manifest.json`, msg.token, () => {}, 'no-store')));
   const total = manifest.files.reduce((n, f) => n + f.bytes, 0);
   const cache = await openCache();
   const files = {};
@@ -68,7 +69,7 @@ async function loadProModel(msg) {
       if (bytes.length !== f.bytes) bytes = null;
     }
     if (!bytes) {
-      bytes = await fetchWithProgress(`/weights/${msg.model}/${f.name}`, msg.token, (got) => {
+      bytes = await fetchWithProgress(`/weights/${msg.model}/${f.name}?v=${f.sha256.slice(0, 16)}`, msg.token, (got) => {
         post({ id: msg.id, type: 'progress', stage: 'downloading the model (once)', fraction: (done + got) / total,
           detail: `${((done + got) / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB` });
       });
@@ -85,14 +86,19 @@ async function loadProModel(msg) {
           !manifest.files.some((f) => u.pathname.endsWith(`/${f.name}`) && u.searchParams.get('sha256') === f.sha256)) await cache.delete(req);
     }
   }
-  post({ id: msg.id, type: 'progress', stage: 'starting the model', fraction: 1, detail: 'preparing the graphics processor' });
+  post({ id: msg.id, type: 'progress', stage: 'starting the model', fraction: 1, detail: '' });
   const pro = await loadPro(manifest, files);
   return { kind: 'pro', pro, info: { name: manifest.name, training: manifest.training, backend: pro.backend, params: manifest.params } };
 }
 
 async function load(msg) {
   if (msg.engine === 'pro') {
-    if (!models[msg.model]) models[msg.model] = await loadProModel(msg);
+    if (!models[msg.model]) {
+      for (const [id, m] of Object.entries(models)) {   // one Pro model at a time: each holds about 230 MB of float32 weights
+        if (m.kind === 'pro') { delete models[id]; for (const s of Object.values(m.pro.sessions)) await s.release(); }
+      }
+      models[msg.model] = await loadProModel(msg);
+    }
     return models[msg.model];
   }
   if (!fontReady) fontReady = fetch('/data/font.json').then((r) => r.json()).then(setFont);
