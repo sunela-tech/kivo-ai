@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from . import bitmap, paths
+from . import bitmap, palette, paths
 from .config import Config, model_fingerprint
 from .data import store
 from .engine import build_model, weights_info
@@ -72,7 +72,8 @@ def eval_inkos1(cfg: Config, model, device, n: int, out: Path) -> dict:
     from .vector.render import render
     val = store.VectorSet(paths.data_dir(cfg.id), "val")
     kinds = val.kinds
-    V = lang.VOCAB
+    V = model.cfg.vocab
+    color = V > lang.VOCAB
 
     # 1. teacher-forced, per family
     agg = {}
@@ -98,20 +99,29 @@ def eval_inkos1(cfg: Config, model, device, n: int, out: Path) -> dict:
     gen_stats = {}
     sheet = []
     free_ok = complete = 0
+    color_hit = color_all = palette_ok = 0
     for j, i in enumerate(idx):
         prompt, toks, kind = val.get(int(i))
-        ref_ops, _ = lang.decode(list(toks) + [lang.EOS], len(prompt))
+        ref_ops, _ = lang.decode(list(toks) + [lang.EOS], len(prompt), V)
         g = torch.Generator().manual_seed(int(i))
         res = model.generate(prompt, float(s.temperature), float(s.top_p), generator=g)
         free = model.generate(prompt, float(s.temperature), float(s.top_p), constrain=False,
                               generator=torch.Generator().manual_seed(int(i)))
         free_ok += int(free["complete"])
         complete += int(res["complete"])
-        a = render(res["ops"], prompt, 128, seed=0)
-        b = render(ref_ops, prompt, 128, seed=0)
+        a = render(res["ops"], prompt, 128, seed=0, color=color)
+        b = render(ref_ops, prompt, 128, seed=0, color=color)
         st = gen_stats.setdefault(kinds[kind], {"n": 0, "iou": 0.0, "text_ref": 0, "text_hit": 0, "bars": 0, "bar_match": 0, "bar_err": []})
         st["n"] += 1
         st["iou"] += _iou(bitmap.image_to_ink(a), bitmap.image_to_ink(b))
+        if color:                                  # same colour on the same pixel, among inked pixels
+            ia, ib = np.asarray(a), np.asarray(b)
+            inked = (ia != palette.WHITE) | (ib != palette.WHITE)
+            color_hit += int(((ia == ib) & inked).sum())
+            color_all += int(inked.sum())
+            used = {op[1] for op in ref_ops if op[0] == "COLOR"}
+            got = {op[1] for op in res["ops"] if op[0] == "COLOR"}
+            palette_ok += int(used == got)
         ref_text = [lang.resolve_text(op[5], prompt) for op in ref_ops if op[0] == "TEXT"]
         got_text = [lang.resolve_text(op[5], prompt) for op in res["ops"] if op[0] == "TEXT"]
         pool = list(got_text)
@@ -121,14 +131,15 @@ def eval_inkos1(cfg: Config, model, device, n: int, out: Path) -> dict:
                 pool.remove(t)
                 st["text_hit"] += 1
         if kinds[kind] == "bar":
-            rb = sorted([op[1:] for op in ref_ops if op[0] in ("RECT", "BOX")])
-            gb = sorted([op[1:] for op in res["ops"] if op[0] in ("RECT", "BOX")])
+            # one bar per x position: a colourful chart draws each bar twice (fill, then outline)
+            rb = sorted({op[1]: op[1:] for op in ref_ops if op[0] in ("RECT", "BOX")}.values())
+            gb = sorted({op[1]: op[1:] for op in res["ops"] if op[0] in ("RECT", "BOX")}.values())
             st["bars"] += 1
             if len(rb) == len(gb):
                 st["bar_match"] += 1
                 st["bar_err"] += [abs(min(r[1], r[3]) - min(q[1], q[3])) for r, q in zip(rb, gb)]
         if j < 24:
-            sheet += [render(res["ops"], prompt, 192, seed=0), render(ref_ops, prompt, 192, seed=0)]
+            sheet += [render(res["ops"], prompt, 192, seed=0, color=color), render(ref_ops, prompt, 192, seed=0, color=color)]
     by_kind = {}
     tot = {"n": 0, "iou": 0.0, "text_ref": 0, "text_hit": 0, "bars": 0, "bar_match": 0, "bar_err": []}
     for k, st in sorted(gen_stats.items()):
@@ -145,6 +156,8 @@ def eval_inkos1(cfg: Config, model, device, n: int, out: Path) -> dict:
             "text_recall": (tot["text_hit"] / tot["text_ref"]) if tot["text_ref"] else None,
             "bar_count_match": (tot["bar_match"] / tot["bars"]) if tot["bars"] else None,
             "bar_height_mae_grid": float(np.mean(tot["bar_err"])) if tot["bar_err"] else None,
+            "color_pixel_match": (color_hit / color_all) if color and color_all else None,
+            "color_set_match": (palette_ok / len(idx)) if color else None,
             "by_kind": by_kind,
         },
         "samples": "samples.png  (pairs: generated, then reference)",
@@ -157,7 +170,7 @@ def eval_inkos1(cfg: Config, model, device, n: int, out: Path) -> dict:
 # --------------------------------------------------------------------------
 
 def image_stats(ink: np.ndarray) -> dict:
-    """ink: bool [N, H, W]."""
+    """ink: bool [N, H, W] (for colour images: every pixel that is not white)."""
     edges = (ink[:, :, 1:] != ink[:, :, :-1]).mean() + (ink[:, 1:, :] != ink[:, :-1, :]).mean()
     pad = np.pad(ink, ((0, 0), (1, 1), (1, 1)))
     lonely = ink & ~(pad[:, :-2, 1:-1] | pad[:, 2:, 1:-1] | pad[:, 1:-1, :-2] | pad[:, 1:-1, 2:])
@@ -169,30 +182,43 @@ def image_stats(ink: np.ndarray) -> dict:
 def eval_pro(cfg: Config, model, device, n: int, out: Path) -> dict:
     import torch.nn.functional as F
 
-    from .models.inkos1_pro import downsample2
+    from .models.inkos1_pro import downsample2, downsample2_idx, one_hot_pm
     val = store.RasterSet(paths.data_dir(cfg.id), "val", pool=1)
+    color = val.color
     g = torch.Generator().manual_seed(99)
     buckets = [(0.02, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]
     bce = np.zeros(len(buckets))
     acc = np.zeros(len(buckets))
-    ref_iou, real_lr, caps, nb = [], [], [], 0
+    ref_iou, ref_acc, real_lr, real_idx, caps, nb = [], [], [], [], [], 0
     for bi, batch in enumerate(val.batches(0, 8, 0, shuffle=False)):
         if bi >= 6:
             break
         hr = batch["image"].to(device)
-        lr = downsample2(hr)
+        lr = downsample2_idx(hr) if color else downsample2(hr)
+        x0 = one_hot_pm(lr) if color else lr * 2 - 1
         text, mask, pooled = model.text(batch["caption"])
         for k, (lo, hi) in enumerate(buckets):
             t = (lo + (hi - lo) * torch.rand(hr.shape[0], generator=g)).to(device)
             tb = t.view(-1, 1, 1, 1)
-            x_t = (1 - tb) * (lr * 2 - 1) + tb * torch.randn(lr.shape, generator=g).to(device)
+            x_t = (1 - tb) * x0 + tb * torch.randn(x0.shape, generator=g).to(device)
             logits = model.unet(x_t, t, text, mask, pooled)
-            bce[k] += F.binary_cross_entropy_with_logits(logits.float(), lr).item()
-            acc[k] += ((logits > 0) == (lr > 0.5)).float().mean().item()
-        up = model.upscale(lr > 0.5)
-        for a, b in zip(up[:, 0].cpu().numpy(), (hr[:, 0] > 0.5).cpu().numpy()):
+            if color:
+                bce[k] += F.cross_entropy(logits.float(), lr).item()
+                acc[k] += (logits.argmax(1) == lr).float().mean().item()
+            else:
+                bce[k] += F.binary_cross_entropy_with_logits(logits.float(), lr).item()
+                acc[k] += ((logits > 0) == (lr > 0.5)).float().mean().item()
+        if color:
+            up = model.upscale(lr)
+            ref_acc.append(float((up == hr).float().mean()))
+            pairs = zip((up != palette.WHITE).cpu().numpy(), (hr != palette.WHITE).cpu().numpy())
+            real_idx.append(lr.cpu().numpy())
+        else:
+            up = model.upscale(lr > 0.5)
+            pairs = zip(up[:, 0].cpu().numpy(), (hr[:, 0] > 0.5).cpu().numpy())
+        for a, b in pairs:
             ref_iou.append(_iou(a, b))
-        real_lr.append((lr[:, 0] > 0.5).cpu().numpy())
+        real_lr.append((lr != palette.WHITE).cpu().numpy() if color else (lr[:, 0] > 0.5).cpu().numpy())
         caps += batch["caption"]
         nb += 1
     real = np.concatenate(real_lr)
@@ -202,20 +228,27 @@ def eval_pro(cfg: Config, model, device, n: int, out: Path) -> dict:
     for i in range(0, k, 4):
         ink = model.sample(caps[i: i + 4], steps=int(s.steps), guidance=float(s.guidance),
                            generator=torch.Generator().manual_seed(1000 + i))
-        gens.append(ink[:, 0].cpu().numpy())
-    gen = np.concatenate(gens) if gens else np.zeros((0, 1, 1), bool)
+        gens.append(ink.cpu().numpy() if color else ink[:, 0].cpu().numpy())
+    gen = np.concatenate(gens) if gens else np.zeros((0, 1, 1), np.uint8 if color else bool)
     sheet = []
-    for a, b in zip(gen[:16], real[:16]):
-        sheet += [bitmap.ink_to_image(a), bitmap.ink_to_image(b)]
+    shown = np.concatenate(real_idx) if color else real
+    for a, b in zip(gen[:16], shown[:16]):
+        sheet += [palette.idx_to_image(a), palette.idx_to_image(b)] if color else [bitmap.ink_to_image(a), bitmap.ink_to_image(b)]
+    extra = {}
+    if color:
+        extra = {"refiner_pixel_acc": float(np.mean(ref_acc)), "real_colors": palette.usage(shown),
+                 "generated_colors": palette.usage(gen) if len(gen) else {}}
+        gen = gen != palette.WHITE
     if sheet:
         bitmap.save_png(bitmap.contact_sheet(sheet, 8, 256), out / "samples.png")
     rs, gs = image_stats(real), (image_stats(gen) if len(gen) else {})
     return {
-        "denoising_by_noise_level": [{"t": f"{lo}-{hi}", "bce": bce[i] / nb, "bit_acc": acc[i] / nb} for i, (lo, hi) in enumerate(buckets)],
-        "base_bce": float(bce.mean() / nb), "base_bit_acc": float(acc.mean() / nb),
+        "denoising_by_noise_level": [{"t": f"{lo}-{hi}", "loss": bce[i] / nb, "pixel_acc": acc[i] / nb} for i, (lo, hi) in enumerate(buckets)],
+        "base_loss": float(bce.mean() / nb), "base_pixel_acc": float(acc.mean() / nb),
         "refiner_iou": float(np.mean(ref_iou)),
         "real_images": rs, "generated_images": {"n": int(len(gen)), **gs},
         "stat_gap": {key: abs(gs[key] - rs[key]) for key in gs},
+        **extra,
         "samples": "samples.png  (pairs: generated, then a real image with the same caption)",
     }
 

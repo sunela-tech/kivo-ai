@@ -14,6 +14,7 @@ import math
 
 import numpy as np
 
+from .. import palette
 from .manga_draw import Ink
 
 
@@ -40,7 +41,8 @@ GIRL_OUTFITS = ("sailor uniform", "shirt and tie", "hoodie", "t-shirt", "kimono"
 BOY_OUTFITS = ("school jacket", "shirt and tie", "hoodie", "t-shirt", "kimono")
 
 
-def sample_character(rng) -> dict:
+def sample_character(rng, color: bool = False) -> dict:
+    """color=True draws hair, eyes and clothes from the six-colour palette."""
     g = pick(rng, ("girl", "girl", "boy"))
     acc = []
     if rng.random() < 0.2:
@@ -54,12 +56,15 @@ def sample_character(rng) -> dict:
     return {
         "gender": g,
         "hair": pick(rng, GIRL_HAIR if g == "girl" else BOY_HAIR),
-        "color": pick(rng, ("black", "black", "white", "gray")),
+        "color": pick(rng, ("black", "black", "red", "yellow", "blue", "green", "white") if color
+                      else ("black", "black", "white", "gray")),
         "bangs": pick(rng, BANGS),
         "eyes": pick(rng, ("normal", "normal", "big", "narrow")),
         "expr": pick(rng, EXPRESSIONS),
         "outfit": pick(rng, GIRL_OUTFITS if g == "girl" else BOY_OUTFITS),
-        "outfit_fill": pick(rng, ("white", "white", "tone", "black")),
+        "outfit_fill": pick(rng, ("white", "red", "yellow", "blue", "green", "black") if color
+                            else ("white", "white", "tone", "black")),
+        "eye_color": pick(rng, ("blue", "green", "red", "black")) if color else None,
         "acc": acc,
         "blush": rng.random() < 0.3,
         "jaw": float(rng.uniform(0.56, 0.72)),
@@ -72,9 +77,13 @@ def character_tags(a: dict, with_outfit: bool = True) -> list[str]:
     tags = [a["gender"], f"{a['hair']} {a['color']} hair", f"{a['bangs']} bangs"]
     if a["eyes"] != "normal":
         tags.append(f"{a['eyes']} eyes")
+    colored = a.get("eye_color") is not None
+    if colored:
+        tags.append(f"{a['eye_color']} eyes")
     tags.append(a["expr"])
     if with_outfit:
-        tags.append(a["outfit"])
+        plain = not colored or a["outfit_fill"] == "white" or a["outfit"] == "school jacket"
+        tags.append(a["outfit"] if plain else f"{a['outfit_fill']} {a['outfit']}")
     tags += a["acc"]
     if a["blush"]:
         tags.append("blush")
@@ -87,7 +96,7 @@ def short_description(a: dict) -> str:
 
 # --------------------------------------------------------------------------
 
-def _eye(ink: Ink, P, ex, ey, w, h, style, side, lw):
+def _eye(ink: Ink, P, ex, ey, w, h, style, side, lw, iris_fill=(255, 0.45)):
     """side = +1 for the eye on the right of the picture (outer corner at +x)."""
     if style == "happy":
         ink.curve(P([(ex - w, ey + 0.35 * h), (ex - 0.4 * w, ey - 0.35 * h), (ex + 0.4 * w, ey - 0.35 * h),
@@ -107,7 +116,7 @@ def _eye(ink: Ink, P, ex, ey, w, h, style, side, lw):
         return
     ix, iy, rx, ry = ex, ey + 0.08 * h, 0.56 * w, 0.98 * h
     iris = ell(ix, iy, rx, ry)
-    ink.shape(P(iris), 255, 0.45, lw * 0.9)
+    ink.shape(P(iris), iris_fill[0], iris_fill[1], lw * 0.9)
     ink.fill(P([p for p in iris if p[1] <= iy - 0.15 * ry]), 0)                     # shadow under the lid
     ink.shape(P(ell(ix, iy + 0.08 * ry, 0.4 * rx, 0.46 * ry)), 0, 0, 0)              # pupil
     ink.shape(P(ell(ix - 0.32 * rx, iy - 0.42 * ry, 0.3 * rx, 0.26 * ry)), 255, 0, 0)  # highlights
@@ -121,6 +130,13 @@ def _eye(ink: Ink, P, ex, ey, w, h, style, side, lw):
         ink.curve(P([(inner, ey - 0.3 * h), (ex, ey - 0.55 * h), (outer, ey - 0.5 * h)]), lw * 2.6, taper=0.3)
     ink.curve(P([(ex - 0.55 * w, ey + 1.04 * h), (ex, ey + 1.12 * h), (ex + 0.55 * w, ey + 1.04 * h)]), lw * 0.8)
     ink.curve(P([(inner + side * 0.2 * w, ey - 1.3 * h), (ex, ey - 1.42 * h), (outer, ey - 0.95 * h)]), lw * 0.6)
+
+
+def _outfit_fill(a: dict, colour: bool) -> tuple:
+    """(fill, screentone) for clothes: a palette colour, or white / tone / black."""
+    if colour:
+        return (palette.INDEX.get(a["outfit_fill"], palette.WHITE), 0.0)
+    return {"white": (255, 0.0), "tone": (255, 0.32), "black": (0, 0.0)}.get(a["outfit_fill"], (255, 0.0))
 
 
 def _bangs_edge(rng, kind: str, n: int) -> list:
@@ -167,7 +183,13 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         return np.stack([cx + sc * q[:, 0], cy + sc * q[:, 1]], axis=1)
 
     lw = max(1.6, sc * 0.022)
-    hfill, htone = HAIR[a["color"]]
+    colour = ink.is_color
+    if colour:
+        hfill, htone = palette.INDEX[a["color"]], 0.0
+        dark_hair = hfill in palette.DARK
+    else:
+        hfill, htone = HAIR[a["color"]]
+        dark_hair = hfill == 0
     hair, gender = a["hair"], a["gender"]
 
     # 1. hair behind the head
@@ -200,7 +222,7 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
             ink.shape(P([(sgn * 0.52, -1.3), (sgn * 0.86, -1.72), (sgn * 0.98, -1.12)]), 255, 0.35, lw * 0.6)
 
     # 2. body and outfit
-    ofill = {"white": (255, 0.0), "tone": (255, 0.32), "black": (0, 0.0)}[a["outfit_fill"]]
+    ofill = _outfit_fill(a, colour)
     outfit = a["outfit"] if body else "none"
     if outfit == "school jacket":
         ofill = (0, 0.0)
@@ -212,7 +234,7 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         ink.fill(B([(-0.3, 0.7), (0.3, 0.7), (0.36, 1.52), (-0.36, 1.52)]), 255)              # neck
         ink.line(B([(-0.3, 0.85), (-0.35, 1.45)]), lw)
         ink.line(B([(0.3, 0.85), (0.35, 1.45)]), lw)
-    line_c = 255 if ofill[0] == 0 else 0
+    line_c = 255 if (ofill[0] in palette.DARK if colour else ofill[0] == 0) else 0
     if outfit == "t-shirt":
         ink.fill(B([(-0.36, 1.34), (0.36, 1.34), (0.3, 1.6), (0, 1.72), (-0.3, 1.6)]), 255)
         ink.curve(B([(-0.44, 1.38), (-0.25, 1.62), (0, 1.72), (0.25, 1.62), (0.44, 1.38)]), lw * 1.2, color=0, taper=None)
@@ -220,13 +242,17 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         dark = a["outfit_fill"] != "white"
         ink.fill(B([(-0.36, 1.34), (0.36, 1.34), (0, 2.2)]), 255)
         collar = [(-0.36, 1.36), (-1.2, 1.62), (-1.0, 2.25), (0, 2.95), (1.0, 2.25), (1.2, 1.62), (0.36, 1.36), (0, 2.25)]
-        ink.shape(B(collar), 0 if dark else 255, 0, lw)
-        ink.line(B([(-1.04, 1.74), (-0.9, 2.2), (0, 2.76), (0.9, 2.2), (1.04, 1.74)]), lw * 0.9, 255 if dark else 0)
-        ink.shape(B([(0, 2.82), (-0.42, 2.62), (-0.36, 3.12)]), 0 if not dark else 255, 0, lw)
-        ink.shape(B([(0, 2.82), (0.42, 2.62), (0.36, 3.12)]), 0 if not dark else 255, 0, lw)
+        cc = (palette.INDEX[a["outfit_fill"]] if colour else 0) if dark else 255
+        on_dark = cc in palette.DARK if colour else dark
+        bow = palette.RED if colour else (0 if not dark else 255)
+        ink.shape(B(collar), cc, 0, lw)
+        ink.line(B([(-1.04, 1.74), (-0.9, 2.2), (0, 2.76), (0.9, 2.2), (1.04, 1.74)]), lw * 0.9, 255 if on_dark else 0)
+        ink.shape(B([(0, 2.82), (-0.42, 2.62), (-0.36, 3.12)]), bow, 0, lw)
+        ink.shape(B([(0, 2.82), (0.42, 2.62), (0.36, 3.12)]), bow, 0, lw)
     elif outfit == "shirt and tie":
         ink.fill(B([(-0.36, 1.34), (0.36, 1.34), (0.5, 3.8), (-0.5, 3.8)]), 255)
-        ink.shape(B([(-0.1, 1.62), (0.1, 1.62), (0.16, 1.84), (0.27, 2.95), (0, 3.25), (-0.27, 2.95), (-0.16, 1.84)]), 0, 0, lw)
+        ink.shape(B([(-0.1, 1.62), (0.1, 1.62), (0.16, 1.84), (0.27, 2.95), (0, 3.25), (-0.27, 2.95), (-0.16, 1.84)]),
+                  palette.RED if colour else 0, 0, lw)
         for sgn in (1, -1):
             ink.shape(B([(sgn * 0.36, 1.36), (sgn * 0.78, 1.6), (sgn * 0.3, 1.98), (0, 1.62)]), 255, 0, lw)
             ink.line(B([(sgn * 0.5, 1.9), (sgn * 0.5, 3.8)]), lw, 0)
@@ -263,8 +289,9 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
     styles = {"smiling": ("open", "open"), "neutral": ("open", "open"), "laughing": ("happy", "happy"),
               "surprised": ("surprised", "surprised"), "angry": ("half", "half"), "sad": ("open", "open"),
               "calm": ("calm", "calm"), "winking": ("open", "happy")}[expr]
+    iris = (palette.INDEX[a["eye_color"]], 0.0) if colour and a.get("eye_color") else (255, 0.45)
     for sgn, st in zip((-1, 1), styles):
-        _eye(ink, P, sgn * ex, ey, w, h, st, sgn, lw)
+        _eye(ink, P, sgn * ex, ey, w, h, st, sgn, lw, iris)
     by = ey - h - 0.26
     di, do = {"angry": (0.14, -0.08), "sad": (-0.1, 0.08), "surprised": (-0.12, -0.1)}.get(expr, (0.0, 0.02))
     for sgn in (-1, 1):
@@ -285,7 +312,7 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         for sgn in (-1, 1):
             for k in range(3):
                 x = sgn * (0.56 + 0.08 * k)
-                ink.line(P([(x + 0.04, 0.4), (x - 0.04, 0.54)]), lw * 0.6)
+                ink.line(P([(x + 0.04, 0.4), (x - 0.04, 0.54)]), lw * 0.6, palette.RED if colour else 0)
 
     # 5. hair in front
     n = int(shape_rng.integers(4, 8))
@@ -298,7 +325,7 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         for sgn in (1, -1):
             ink.shape(P([(sgn * 1.1, -0.3), (sgn * 1.17, 0.5), (sgn * 1.02, 1.18), (sgn * 0.9, 0.6), (sgn * 0.86, -0.2)]),
                       hfill, htone, lw)
-    if hfill == 0:
+    if dark_hair:
         ink.curve(P([(-0.72, -0.9), (-0.3, -1.06), (0.3, -1.06), (0.72, -0.9)]), lw * 2.4, color=255, taper=0.15)
         for x in (-0.38, 0.05, 0.42):
             ink.line(P([(x, -1.2), (x + 0.05, -0.85)]), lw * 0.9, 0)
@@ -314,19 +341,19 @@ def draw_character(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float, tilt
         ink.line(P([(-0.07, ey), (0.07, ey)]), lw * 1.1)
     if "hair ribbon" in a["acc"]:
         bx, by2 = 0.78, -1.12
-        col = 255 if hfill == 0 else 0
+        col = (palette.YELLOW if hfill == palette.RED else palette.RED) if colour else (255 if hfill == 0 else 0)
         for sgn in (-1, 1):
             ink.shape(P([(bx, by2), (bx + sgn * 0.42, by2 - 0.26), (bx + sgn * 0.42, by2 + 0.26)]), col, 0, lw)
         ink.shape(P(ell(bx, by2, 0.09, 0.09, 12)), col, 0, lw)
     if "headband" in a["acc"]:
-        col = 255 if hfill == 0 else 0
+        col = (palette.RED if hfill == palette.YELLOW else palette.YELLOW) if colour else (255 if hfill == 0 else 0)
         ink.curve(P([(-1.05, -0.62), (-0.6, -1.12), (0, -1.26), (0.6, -1.12), (1.05, -0.62)]), lw * 3.2, color=col, taper=None)
 
 
 def draw_chibi(ink: Ink, rng, a: dict, cx: float, cy: float, sc: float):
     """Full-body super-deformed figure: big head on a small body. cy is the head centre."""
     lw = max(1.6, sc * 0.022)
-    ofill = {"white": (255, 0.0), "tone": (255, 0.32), "black": (0, 0.0)}[a["outfit_fill"]]
+    ofill = _outfit_fill(a, ink.is_color)
 
     def B(pts):
         q = np.asarray(pts, dtype=float)

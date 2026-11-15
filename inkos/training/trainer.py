@@ -53,7 +53,7 @@ def checkpoint_summary(ck: dict, steps_per_epoch: int | None = None, target_epoc
         "dataset_size": int(ck.get("dataset_size", 0)),
         "target_epochs": int(target_epochs if target_epochs is not None else ck.get("config", {}).get("target_epochs", 0)),
         "train_seconds": round(float(ck.get("train_seconds", 0.0)), 1), "val": ck.get("val") or {},
-        "saved_at": ck.get("saved_at"),
+        "saved_at": ck.get("saved_at"), "initialised_from": ck.get("init_info"),
     }
 
 
@@ -122,6 +122,7 @@ class Trainer:
         self._stop = None
         self._log_file = None
         self._warm_from = 0           # step at which the optimiser last started cold
+        self.init_info = None         # set when the weights were initialised from another model
 
     # -- logging --------------------------------------------------------------
     def log(self, msg: str):
@@ -160,6 +161,7 @@ class Trainer:
             "samples_seen": self.samples_seen, "train_seconds": self.train_seconds,
             "dataset_size": self.dataset_size, "batch_size": self.batch_size,
             "best_val": self.best_val, "val": self.last_val, "torch_rng": torch.get_rng_state(),
+            "init_info": self.init_info,
             "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
         path = self.ckpt_dir / name
@@ -204,6 +206,7 @@ class Trainer:
         self.global_step, self.samples_seen = ck["global_step"], ck["samples_seen"]
         self.train_seconds = ck.get("train_seconds", 0.0)
         self.best_val, self.last_val = ck.get("best_val"), ck.get("val") or {}
+        self.init_info = ck.get("init_info")
         if ck.get("torch_rng") is not None:
             torch.set_rng_state(ck["torch_rng"])
         if (ck.get("dataset_size"), ck.get("batch_size")) != (self.dataset_size, self.batch_size) and self.step_in_epoch:
@@ -233,6 +236,7 @@ class Trainer:
         self.model.load_state_dict(sd)
         self.ema.load_state_dict(sd)
         rec = man.get("training", {})
+        self.init_info = rec.get("initialised_from")
         self.epoch = int(rec.get("epochs_completed", 0))
         self.global_step = int(rec.get("global_step", 0))
         self.train_seconds = float(rec.get("train_seconds", 0.0))
@@ -247,6 +251,46 @@ class Trainer:
         self._warm_from = self.global_step
         self.log(f"no checkpoint here: continuing from installed weights ({self.epoch} epochs completed, "
                  f"{self.samples_seen} samples seen). The optimiser starts cold.")
+        return True
+
+    @torch.no_grad()
+    def init_from(self, other_id: str) -> bool:
+        """Start this model from another model's installed weights.
+
+        Tensors with the same name and shape are copied; a tensor that only
+        grew (INKOS 1.1 has six more vocabulary rows than INKOS 1) gets the
+        old values in its leading slice and keeps its random values elsewhere.
+        This model's own epoch counter still starts at zero.
+        """
+        d = paths.model_dir(other_id)
+        try:
+            man = json.loads((d / "manifest.json").read_text())
+            sd = torch.load(d / man["file"], map_location="cpu", weights_only=True)
+        except (OSError, ValueError, KeyError):
+            self.log(f"train.init_from: no installed weights for '{other_id}', starting from random weights")
+            return False
+        own = self.model.state_dict()
+        same = grown = 0
+        for k, v in sd.items():
+            if k not in own:
+                continue
+            v = v.to(own[k].dtype)
+            if v.shape == own[k].shape:
+                own[k].copy_(v)
+                same += 1
+            elif v.ndim == own[k].ndim and all(a <= b for a, b in zip(v.shape, own[k].shape)):
+                own[k][tuple(slice(0, n) for n in v.shape)].copy_(v)
+                grown += 1
+        if not same:
+            self.log(f"train.init_from: '{other_id}' has no tensors in common with this model")
+            return False
+        self.ema.load_state_dict(self.model.state_dict())
+        rec = man.get("training", {})
+        self.init_info = {"model": other_id, "name": man.get("name", other_id),
+                          "epochs_completed": rec.get("epochs_completed", 0), "samples_seen": rec.get("samples_seen", 0)}
+        self.log(f"initialised from {self.init_info['name']} ({self.init_info['epochs_completed']} epochs, "
+                 f"{self.init_info['samples_seen']} samples): {same} tensors copied, {grown} extended. "
+                 f"This model's own training starts at epoch 0.")
         return True
 
     # -- status -----------------------------------------------------------------
@@ -267,6 +311,7 @@ class Trainer:
             "device": str(self.device), "params": self.params, "fingerprint": self.fingerprint,
             "pid": os.getpid(), "started_at": self.started_at,
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "previews": self.previews,
+            "initialised_from": self.init_info,
         })
 
     # -- evaluation inside training -----------------------------------------------

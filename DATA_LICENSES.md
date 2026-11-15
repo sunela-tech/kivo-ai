@@ -30,6 +30,14 @@ this notice when redistributed.
 The stroke font used for all lettering (`inkos/vector/font.py`) was drawn for
 this project.
 
+## INKOS 1.1
+
+The same sources as INKOS 1. Colour is added by code
+(`inkos/data/colorize.py`), which recolours the drawing programs and puts
+the matching colour words at the start of the prompt. INKOS 1.1 is also
+initialised from INKOS 1's weights, so the Quick, Draw! attribution above
+applies to it as well.
+
 ## INKOS 1 Pro
 
 | Source | What it provides | License |
@@ -42,6 +50,13 @@ procedural set is simple, original artwork drawn by code. To reach
 professional quality the model needs real artwork that you created or are
 licensed to train on; `data import` refuses to run without a license
 statement for that reason.
+
+## INKOS 1.1 Pro
+
+| Source | What it provides | License |
+| --- | --- | --- |
+| INKOS procedural manga generator, colour mode (`inkos/data/manga_*.py`) | the INKOS 1 Pro subjects drawn in the six-colour palette, with colour words in the captions | this repository |
+| Your own imports (`python -m inkos data import`) | artwork you add, snapped to the six palette colours | you state it; it is recorded in `meta.json` |
 
 ## Offline use
 

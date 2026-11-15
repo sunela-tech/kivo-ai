@@ -22,6 +22,11 @@ class Inkos1Task:
         self.val = store.VectorSet(root, "val")
         self.bs = int(cfg.train.batch_size)
         self.seed = int(cfg.train.seed)
+        self.color = bool(cfg.model.get("color"))
+        want = "eink6" if self.color else None
+        if self.train.meta.get("palette") != want:
+            raise SystemExit(f"data in {root} was prepared for a {'black-and-white' if self.color else 'colour'} model. "
+                             f"Run:  python -m inkos data prepare --model {cfg.id}")
 
     @property
     def dataset_size(self) -> int:
@@ -72,7 +77,7 @@ class Inkos1Task:
         for i, prompt in enumerate(self.cfg.preview_prompts):
             g = torch.Generator().manual_seed(1000 + i)
             res = model.generate(prompt, float(s.temperature), float(s.top_p), generator=g)
-            img = render(res["ops"], prompt, 256, seed=i)
+            img = render(res["ops"], prompt, 256, seed=i, color=self.color)
             f = out_dir / f"{i:02d}.png"
             bitmap.save_png(img, f)
             files.append(str(f.relative_to(paths.ROOT)))

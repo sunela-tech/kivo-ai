@@ -42,8 +42,8 @@ class Config(dict):
 
 
 def model_ids() -> list[str]:
-    order = {"inkos1": 0, "inkos1_pro": 1}
-    ids = [p.stem for p in paths.CONFIGS.glob("*.yaml")]
+    order = {"inkos1": 0, "inkos1_pro": 1, "inkos1_1": 2, "inkos1_1_pro": 3}
+    ids = [p.stem for p in paths.CONFIGS.glob("*.yaml") if p.stem != "plans"]
     return sorted(ids, key=lambda i: (order.get(i, 9), i))
 
 

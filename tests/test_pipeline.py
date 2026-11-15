@@ -5,6 +5,7 @@ import time
 import urllib.error
 import urllib.request
 
+import numpy as np
 import pytest
 
 from inkos import bitmap, paths
@@ -158,6 +159,142 @@ def test_pro_train_resume_export_generate(home):
     assert 0 <= report["refiner_iou"] <= 1 and report["generated_images"]["n"] == 4
 
 
+def test_inkos1_1_colour_pipeline(home):
+    """INKOS 1.1: colour data, initialisation from INKOS 1, palette-pure output at every size."""
+    from PIL import Image
+
+    from inkos import evaluate, export, palette
+    from inkos.data import prepare
+    from inkos.engine import Engine, model_status
+    from inkos.training.tasks import get_task
+    from inkos.training.trainer import Trainer
+    from inkos.vector import lang
+    base, cfg = load_config("inkos1"), load_config("inkos1_1")
+    prepare.prepare(base, workers=1, download=False)
+    _train("inkos1", until_epoch=1)
+    export.export(base)
+
+    meta = prepare.prepare(cfg, workers=1, download=False)
+    assert meta["palette"] == "eink6" and meta["vocab"] == lang.VOCAB_COLOR
+    tr = Trainer(cfg, get_task(cfg), device="cpu")
+    assert tr.model.cfg.vocab == lang.VOCAB + 6
+    assert not tr.resume() and not tr.warm_start() and tr.init_from(cfg.train.init_from)
+    assert (tr.epoch, tr.samples_seen) == (0, 0) and tr.init_info["epochs_completed"] == 1
+    old = Engine("cpu")._load("inkos1")["model"]
+    assert (tr.model.tok.weight[: lang.VOCAB] - old.tok.weight).abs().max() < 1e-3       # float16 rounding only
+    assert (tr.model.blocks[0].fc1.weight - old.blocks[0].fc1.weight).abs().max() < 1e-3
+    assert tr.fit(until_epoch=1) == "paused"
+    st = _state("inkos1_1")
+    assert st["epochs_completed"] == 1 and st["initialised_from"]["model"] == "inkos1"
+    man = export.export(cfg)
+    assert man["training"]["initialised_from"]["name"] == "INKOS 1"
+    assert model_status("inkos1_1")["palette"]["names"] == list(palette.NAMES)
+
+    eng = Engine("cpu")
+    for size in (256, 512, 1024):
+        res = eng.generate("inkos1_1", "red heart", size=size, seed=2)
+        img = res["image"]
+        assert img.mode == "P" and img.size == (size, size) and palette.is_pure(img) and bitmap.is_pure(img)
+        assert set(res["meta"]["colors"]) == set(palette.NAMES) and res["meta"]["palette"] == "eink6"
+    f = bitmap.save_png(img, home / "c.png")
+    back = Image.open(f)
+    assert back.mode == "P" and len(back.getpalette()) // 3 == palette.N and palette.is_pure(back)
+    report = evaluate.run(cfg, n=6, device="cpu")
+    assert 0 <= report["generated"]["color_set_match"] <= 1
+    with pytest.raises(SystemExit, match="black-and-white"):              # a colour model refuses mono data
+        get_task(load_config("inkos1_1", ["id=inkos1"]))
+
+
+def test_inkos1_1_pro_colour_pipeline(home):
+    from inkos import evaluate, export, palette
+    from inkos.data import prepare, raster_import
+    from inkos.engine import Engine
+    cfg = load_config("inkos1_1_pro")
+    meta = prepare.prepare(cfg, workers=1)
+    assert meta["palette"] == "eink6" and meta["train_count"] == 48
+    art = home / "art"
+    art.mkdir()
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (200, 200), (250, 250, 250))
+    ImageDraw.Draw(im).rectangle([40, 40, 160, 160], fill=(230, 20, 30))
+    im.save(art / "red_square.png")
+    assert raster_import.import_folder(cfg, str(art), license="own work")["train_count"] == 49
+    idx = raster_import.quantize(im, 64)
+    assert set(np.unique(idx)) == {palette.WHITE, palette.RED}             # snapped to the palette, no in-betweens
+
+    tr, _, status = _train("inkos1_1_pro", until_epoch=1)
+    st = _state("inkos1_1_pro")
+    assert status == "paused" and st["epochs_completed"] == 1 and "base_ce" in st["train_metrics"]
+    export.export(cfg)
+    eng = Engine("cpu")
+    for size in (64, 128, 256):
+        res = eng.generate("inkos1_1_pro", "color manga portrait, girl, red hair", size=size, seed=3, steps=2)
+        assert res["image"].mode == "P" and res["image"].size == (size, size) and palette.is_pure(res["image"])
+    report = evaluate.run(cfg, n=4, device="cpu")
+    assert 0 <= report["refiner_pixel_acc"] <= 1 and set(report["generated_colors"]) == set(palette.NAMES)
+
+
+def test_plans_limit_generation_but_not_training(home):
+    from inkos import export, plans, server
+    from inkos.data import prepare
+    cfg = load_config("inkos1")
+    prepare.prepare(cfg, workers=1, download=False)
+    _train("inkos1", max_steps=3)                                          # training needs no plan
+    export.export(cfg)
+    s = plans.summary()
+    assert s["current"] == "basic" and [p["id"] for p in s["plans"]] == ["basic", "plus", "studio"]
+    assert s["plans"][0]["models"] == ["inkos1"] and s["plans"][2]["images_per_day"] is None
+
+    srv = server.make_server("127.0.0.1", 0, "cpu")
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def refused(body):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _call(base, "POST", "/api/generate", body)
+        return e.value.code, json.loads(e.value.read())["error"]
+
+    def generate(body):
+        _, job, _ = _call(base, "POST", "/api/generate", body)
+        for _ in range(300):
+            _, job, _ = _call(base, "GET", f"/api/jobs/{job['id']}")
+            if job["status"] in ("done", "error"):
+                return job
+            time.sleep(0.1)
+
+    try:
+        _, st, _ = _call(base, "GET", "/api/status")
+        assert {m["id"]: m["in_plan"] for m in st["models"]} == {"inkos1": True, "inkos1_pro": False, "inkos1_1": False, "inkos1_1_pro": False}
+        code, msg = refused({"model": "inkos1_1", "prompt": "red heart"})
+        assert code == 403 and "INKOS 1.1 is not part of the Basic plan" in msg
+        code, msg = refused({"model": "inkos1", "prompt": "note: a", "size": 1024})
+        assert code == 403 and "up to 512 px" in msg
+        with pytest.raises(urllib.error.HTTPError) as e:                    # Basic holds one project
+            _call(base, "POST", "/api/projects", {"name": "second"})
+        assert e.value.code == 403
+
+        assert generate({"model": "inkos1", "prompt": "note: a", "size": 256})["status"] == "done"
+        assert _call(base, "GET", "/api/plans")[1]["usage"] == {"date": time.strftime("%Y-%m-%d"), "images": 1, "limit": 30, "remaining": 29}
+        (home / "usage.json").write_text(json.dumps({"date": time.strftime("%Y-%m-%d"), "images": 30}))
+        code, msg = refused({"model": "inkos1", "prompt": "note: a", "size": 256})
+        assert code == 403 and "used up" in msg
+        (home / "usage.json").write_text(json.dumps({"date": "2001-01-01", "images": 30}))   # a new day starts at zero
+        assert plans.images_today() == 0
+
+        _, s, _ = _call(base, "POST", "/api/plan", {"plan": "plus"})
+        assert s["current"] == "plus" and json.loads((home / "settings.json").read_text())["plan"] == "plus"
+        assert generate({"model": "inkos1", "prompt": "note: a", "size": 1024})["status"] == "done"
+        code, msg = refused({"model": "inkos1_1", "prompt": "red heart"})   # allowed by Plus, but never trained here
+        assert code == 409 and "no trained weights" in msg
+        assert _call(base, "POST", "/api/projects", {"name": "second"})[0] == 200
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _call(base, "POST", "/api/plan", {"plan": "enterprise"})
+        assert e.value.code == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def _call(base, method, path, body=None, header=True):
     req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None)
     if header:
@@ -176,6 +313,8 @@ def test_server_api(home):
     _train("inkos1", max_steps=4)
     export.export(cfg)
 
+    from inkos import plans
+    plans.set_plan("studio")                                               # plans are tested separately
     srv = server.make_server("127.0.0.1", 0, "cpu")
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     threading.Thread(target=srv.serve_forever, daemon=True).start()

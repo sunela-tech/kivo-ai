@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from .. import bitmap, paths
+from .. import bitmap, palette, paths
 from ..config import Config
 from ..data import store
 from .tasks import _to_device
@@ -19,6 +19,10 @@ class ProTask:
         self.val = store.RasterSet(root, "val", pool=1)
         self.bs = int(cfg.train.batch_size)
         self.seed = int(cfg.train.seed)
+        self.color = int(cfg.model.get("colors", 1)) > 1
+        if self.train.color != self.color:
+            raise SystemExit(f"data in {root} is {'colour' if self.train.color else 'black-and-white'} but {cfg.name} "
+                             f"is not. Delete that folder and run:  python -m inkos data prepare --model {cfg.id}")
         t = cfg.train
         self.kw = dict(caption_dropout=float(t.caption_dropout), self_cond_prob=float(t.self_cond_prob),
                        refiner_crop=int(t.refiner_crop), refiner_crops=int(t.refiner_crops))
@@ -73,7 +77,7 @@ class ProTask:
         ink = model.sample(prompts, steps=int(s.get("preview_steps", 16)), guidance=float(s.guidance), generator=g)
         files, images = [], []
         for i in range(len(prompts)):
-            img = bitmap.ink_to_image(ink[i, 0].cpu().numpy())
+            img = palette.idx_to_image(ink[i].cpu().numpy()) if self.color else bitmap.ink_to_image(ink[i, 0].cpu().numpy())
             f = out_dir / f"{i:02d}.png"
             bitmap.save_png(img, f)
             files.append(str(f.relative_to(paths.ROOT)))

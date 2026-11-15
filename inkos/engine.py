@@ -15,9 +15,10 @@ import random
 import threading
 import time
 
+import numpy as np
 import torch
 
-from . import bitmap, paths
+from . import bitmap, palette, paths
 from .config import Config, load_config, model_fingerprint, model_ids
 from .data import store
 from .prompts import normalize_prompt
@@ -92,6 +93,7 @@ def memory_estimate(cfg: Config, params: int) -> dict:
         m = cfg.model
         g = (m.base_resolution // m.patch) ** 2
         act = 2 * sum(c * g / 4 ** i for i, c in enumerate(m.channels)) * 4 * 12 / 1e6       # two guided branches
+        act += 4 * int(m.get("colors", 1)) * m.base_resolution ** 2 * 4 / 1e6                # the picture planes
         tile = m.refiner_channels * 6 * 288 * 288 * 4 * 4 / 1e6
         infer = {str(s): round(w + act + (0 if s <= m.base_resolution else tile)) for s in cfg.inference.sizes}
         train = round(w * 4 + int(cfg.train.batch_size) * 250)     # measured: 4.9 GB at batch 16 on CPU
@@ -136,6 +138,8 @@ def model_status(model_id: str) -> dict:
     newer = bool(w and ck and w["source"] == "installed" and ck.get("samples_seen", 0) > w.get("samples_seen", 0))
     return {
         "id": model_id, "name": cfg.name, "architecture": cfg.architecture, "summary": cfg.summary,
+        "palette": ({"id": palette.ID, "names": list(palette.NAMES), "hex": list(palette.HEX)} if cfg.get("palette") else None),
+        "starts_from": cfg.train.get("init_from"),
         "specialties": list(cfg.specialties), "params": params, "params_m": round(params / 1e6, 2),
         "sizes": list(cfg.inference.sizes), "default_size": int(cfg.inference.default_size),
         "max_prompt": int(cfg.model.max_prompt), "sample_defaults": cfg.sample.plain(),
@@ -199,7 +203,8 @@ class Engine:
             note = progress or (lambda p: None)
             t0 = time.time()
             gen = torch.Generator().manual_seed(seed)
-            meta = {"model": model_id, "model_name": cfg.name, "prompt": text, "size": size, "seed": seed}
+            meta = {"model": model_id, "model_name": cfg.name, "prompt": text, "size": size, "seed": seed,
+                    "palette": cfg.get("palette")}
             if cfg.architecture == "inkscript-transformer":
                 img, extra = self._inkos1(model, cfg, text, size, seed, gen, temperature, note)
             else:
@@ -209,6 +214,7 @@ class Engine:
             meta.update(extra)
             meta.update({
                 "seconds": round(time.time() - t0, 2), "ink_ratio": round(bitmap.ink_ratio(img), 4),
+                "colors": palette.usage(np.asarray(img)) if img.mode == "P" else None,
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "weights": {"source": info["source"], "epochs_completed": info.get("epochs_completed", 0),
                             "epoch_progress": info.get("epoch_progress", 0.0), "samples_seen": info.get("samples_seen", 0),
@@ -230,7 +236,7 @@ class Engine:
 
         res = model.generate(text, temperature, float(s.top_p), budget, generator=gen, progress=on_token)
         note({"stage": "rasterising", "fraction": 0.93, "detail": f"{len(res['tokens'])} tokens"})
-        img = render(res["ops"], text, size, seed=seed)
+        img = render(res["ops"], text, size, seed=seed, color=bool(cfg.model.get("color")))
         return img, {"temperature": temperature, "top_p": float(s.top_p), "tokens": len(res["tokens"]),
                      "complete": bool(res["complete"]), "program": lang.describe(res["ops"])}
 
@@ -250,25 +256,29 @@ class Engine:
         for k in range(ups):
             note({"stage": f"refining to {base * 2 ** (k + 1)} px", "fraction": share + 0.08 * k, "detail": ""})
             ink = upscale_tiled(model, ink)
-        img = bitmap.ink_to_image(ink[0, 0].cpu().numpy())
+        if int(cfg.model.get("colors", 1)) > 1:
+            img = palette.idx_to_image(ink[0].cpu().numpy())
+        else:
+            img = bitmap.ink_to_image(ink[0, 0].cpu().numpy())
         return img, {"steps": steps, "guidance": guidance, "base_resolution": base, "refiner_passes": ups}
 
 
 @torch.no_grad()
-def upscale_tiled(model, ink: torch.Tensor, tile: int = 256, overlap: int = 16) -> torch.Tensor:
-    """2x refine in overlapping tiles so memory stays flat at any size."""
-    B, _, H, W = ink.shape
+def upscale_tiled(model, picture: torch.Tensor, tile: int = 256, overlap: int = 16) -> torch.Tensor:
+    """2x refine in overlapping tiles so memory stays flat at any size.
+    Works on bool [B,1,H,W] ink maps and on [B,H,W] palette indices."""
+    H, W = picture.shape[-2:]
     if max(H, W) <= tile + 2 * overlap:
-        return model.upscale(ink)
-    out = torch.zeros(B, 1, 2 * H, 2 * W, dtype=torch.bool, device=ink.device)
+        return model.upscale(picture)
+    out = torch.zeros(picture.shape[:-2] + (2 * H, 2 * W), dtype=picture.dtype, device=picture.device)
     for y in range(0, H, tile):
         for x in range(0, W, tile):
             y0, x0 = max(0, y - overlap), max(0, x - overlap)
             y1, x1 = min(H, y + tile + overlap), min(W, x + tile + overlap)
-            up = model.upscale(ink[:, :, y0:y1, x0:x1])
+            up = model.upscale(picture[..., y0:y1, x0:x1])
             ty, tx = 2 * (y - y0), 2 * (x - x0)
             h, w = 2 * min(tile, H - y), 2 * min(tile, W - x)
-            out[:, :, 2 * y: 2 * y + h, 2 * x: 2 * x + w] = up[:, :, ty: ty + h, tx: tx + w]
+            out[..., 2 * y: 2 * y + h, 2 * x: 2 * x + w] = up[..., ty: ty + h, tx: tx + w]
     return out
 
 

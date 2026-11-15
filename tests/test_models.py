@@ -159,6 +159,44 @@ def test_pro_learns():
     assert end["refiner_bit_acc"] > 0.97
 
 
+def test_colour_pro_shapes_and_learning():
+    """INKOS 1.1 Pro: six colour planes in, a palette index per pixel out."""
+    from inkos import palette
+    from inkos.engine import upscale_tiled
+    from inkos.models.inkos1_pro import downsample2_idx
+    torch.manual_seed(0)
+    model = Inkos1Pro(ProConfig(base_resolution=32, channels=[16, 32], attn_levels=[1], heads=2, text_dim=32,
+                                text_layers=1, text_heads=2, refiner_channels=8, refiner_blocks=1, colors=6))
+    assert model.unet.conv_in.in_channels == 2 * 6 * 16 and model.unet.conv_out.out_channels == 6 * 16
+    img = torch.full((4, 64, 64), palette.WHITE, dtype=torch.long)
+    img[0, 10:54, 28:36] = palette.RED
+    img[1, 28:36, 10:54] = palette.BLUE
+    img[2, 16:48, 16:48] = palette.GREEN
+    img[3, 40:60, 20:44] = palette.YELLOW
+    batch = {"image": img, "caption": ["red bar", "blue bar", "green square", "yellow box"]}
+    out = model.eval().sample(["red bar", "x"], steps=3, guidance=2.0, generator=torch.Generator().manual_seed(0))
+    assert out.shape == (2, 32, 32) and out.dtype == torch.long and int(out.max()) < palette.N
+    up = model.upscale(out)
+    assert (up == out.repeat_interleave(2, 1).repeat_interleave(2, 2)).all()         # untrained refiner = pixel doubling
+    big = torch.randint(0, palette.N, (1, 96, 96), generator=torch.Generator().manual_seed(1))
+    assert (upscale_tiled(model, big, tile=32, overlap=8) == model.upscale(big)).all()
+
+    two = torch.where(torch.rand(2, 16, 16, generator=torch.Generator().manual_seed(2)) < 0.4, palette.BLACK, palette.WHITE)
+    assert ((downsample2_idx(two) == palette.BLACK) == (downsample2((two == palette.BLACK).float()[:, None])[:, 0] > 0.5)).all()
+
+    model.train()
+    opt = torch.optim.AdamW(model.parameters(), lr=3e-3)
+    g = torch.Generator().manual_seed(1)
+    start = model.loss(batch, refiner_crop=32, generator=torch.Generator().manual_seed(7))[1]
+    for _ in range(120):
+        loss, _ = model.loss(batch, refiner_crop=32, generator=g)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    end = model.loss(batch, refiner_crop=32, generator=torch.Generator().manual_seed(7))[1]
+    assert end["base_ce"] < 0.3 * start["base_ce"] and end["refiner_px_acc"] > 0.97
+
+
 def test_tiled_refiner_matches_single_pass_away_from_seams():
     from inkos.engine import upscale_tiled
     model = _tiny_pro().eval()

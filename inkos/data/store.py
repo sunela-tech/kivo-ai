@@ -139,11 +139,17 @@ class VectorSet:
 # --------------------------------------------------------------------------
 
 def write_raster_shard(path: Path, images: list[np.ndarray], captions: list[str], kinds: list[int]):
-    """images: bool arrays (H, W), ink = True."""
+    """images: bool arrays (H, W) with ink = True, or uint8 arrays of palette indices.
+
+    Black-and-white is stored at one bit per pixel ('bits'), colour at four
+    bits per pixel ('idx4').
+    """
     caps = [np.frombuffer(c.encode("ascii", "replace"), dtype=np.uint8) for c in captions]
+    stack = np.stack(images)
+    pixels = {"bits": bitmap.pack(stack)} if stack.dtype == bool else {"idx4": bitmap.pack4(stack)}
     np.savez_compressed(
         path,
-        bits=bitmap.pack(np.stack(images)),
+        **pixels,
         caption=np.concatenate(caps) if caps else np.zeros(0, np.uint8),
         caption_off=np.cumsum([0] + [len(c) for c in caps]).astype(np.int64),
         kind=np.asarray(kinds, dtype=np.uint8),
@@ -162,6 +168,7 @@ class RasterSet:
         self.meta = _meta(self.root)
         self.kinds = self.meta["kinds"]
         self.res = int(self.meta["resolution"])
+        self.color = self.meta.get("palette") is not None
         self.files = sorted(self.root.glob(f"{split}-*.npz"))
         if not self.files:
             raise FileNotFoundError(f"no {split} shards in {self.root}")
@@ -188,7 +195,7 @@ class RasterSet:
             z = np.load(self.files[int(i)])
             off = z["caption_off"]
             raw = z["caption"].tobytes().decode("ascii")
-            bits.append(z["bits"])
+            bits.append(z["idx4"] if self.color else z["bits"])
             caps.extend(raw[off[k]: off[k + 1]] for k in range(len(off) - 1))
             kinds.append(z["kind"])
         bits, kinds = np.concatenate(bits), np.concatenate(kinds)
@@ -198,7 +205,10 @@ class RasterSet:
         return bits, caps, kinds
 
     def batches(self, epoch: int, batch_size: int, seed: int, skip: int = 0, shuffle: bool = True):
-        """Yields {'image': float [B,1,H,W] in {0,1} (ink = 1), 'caption': [str], 'kind'}.
+        """Yields {'image', 'caption': [str], 'kind'}.
+
+        image is float [B,1,H,W] in {0,1} (ink = 1) for black-and-white data
+        and long [B,H,W] of palette indices for colour data.
 
         Shard groups are chained: what is left over after the last full batch
         of a group opens the next one, so an epoch is always ceil(n / batch)
@@ -232,9 +242,11 @@ class RasterSet:
             for b in range(nb):
                 if done >= skip:
                     sl = slice(b * batch_size, (b + 1) * batch_size)
-                    img = bitmap.unpack(bits[sl], self.res)
-                    yield {"image": torch.from_numpy(img).unsqueeze(1).float(), "caption": caps[sl],
-                           "kind": torch.from_numpy(kinds[sl].astype(np.int64))}
+                    if self.color:
+                        image = torch.from_numpy(bitmap.unpack4(bits[sl]).astype(np.int64))
+                    else:
+                        image = torch.from_numpy(bitmap.unpack(bits[sl], self.res)).unsqueeze(1).float()
+                    yield {"image": image, "caption": caps[sl], "kind": torch.from_numpy(kinds[sl].astype(np.int64))}
                 done += 1
             used = nb * batch_size
             pending = (bits[used:], caps[used:], kinds[used:]) if used < len(kinds) else None

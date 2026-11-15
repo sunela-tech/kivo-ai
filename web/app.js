@@ -14,10 +14,14 @@
 
   const HINTS = {
     'inkscript-transformer':
-      'INKOS 1 follows the patterns it was trained on: note, todo, journal, log, table, sign, bar / line / pie chart, ' +
+      '{name} follows the patterns it was trained on: note, todo, journal, log, table, sign, bar / line / pie chart, ' +
       'flowchart, mind map, timeline, icon and sketch. Text after the colon is copied onto the page exactly; separate items with ";" or new lines.',
     'bit-diffusion-unet':
-      'INKOS 1 Pro reads comma-separated tags: kind of picture, subject, hair, expression, outfit, background.',
+      '{name} reads comma-separated tags: kind of picture, subject, hair, expression, outfit, background.',
+  };
+  const COLOR_HINTS = {
+    'inkscript-transformer': ' Start with a colour instruction: "blue ...", "black and red ..." (text, then marks) or "colorful ...".',
+    'bit-diffusion-unet': ' Begin with "color" and name colours in the tags: "red hair", "blue eyes", "blue sky".',
   };
 
   async function api(method, url, body) {
@@ -67,6 +71,7 @@
   }
   const modelById = (id) => (S.status ? S.status.models.find((m) => m.id === id) : null);
   const currentModel = () => modelById(S.model);
+  const currentPlan = () => S.status.plan.plans.find((p) => p.id === S.status.plan.current);
 
   /* ------------------------------------------------------------------ status */
   async function loadStatus() {
@@ -78,21 +83,24 @@
       return;
     }
     const st = S.status;
-    if (!S.model || !modelById(S.model)) S.model = st.models[0].id;
+    if (!S.model || !modelById(S.model)) S.model = (st.models.find((m) => m.in_plan && m.weights) || st.models[0]).id;
     const hw = st.hardware;
     const gpu = hw.cuda ? `${hw.cuda.name}, ${hw.cuda.vram_gb} GB` : hw.mps ? 'Apple GPU' : 'CPU only';
     setText($('foot-server'), `INKOS ${st.server.version}  |  inference on ${st.server.device}  |  ${gpu}  |  PyTorch ${hw.torch}`);
     renderPicker();
     if (S.view === 'models') renderModels();
+    if (S.view === 'plans') renderPlans();
   }
 
   /* ---------------------------------------------------------------- generate */
   function renderPicker() {
+    const plan = currentPlan();
     const html = S.status.models.map((m) => {
       const w = m.weights;
-      const state = w ? `Trained: ${epochsLine(w, m.training.target_epochs)}` : 'No trained weights yet';
-      return `<button type="button" role="radio" aria-checked="${m.id === S.model}" data-model="${esc(m.id)}">
-        <span class="name">${esc(m.name)}</span><span class="what">${esc(m.specialties.slice(0, 4).join(', '))}</span>
+      let state = w ? `Trained: ${epochsLine(w, m.training.target_epochs)}` : 'No trained weights yet';
+      if (!m.in_plan) state = `Not in the ${plan.name} plan`;
+      return `<button type="button" role="radio" aria-checked="${m.id === S.model}" data-model="${esc(m.id)}" data-locked="${!m.in_plan}">
+        <span class="name">${esc(m.name)}</span><span class="what">${esc(m.specialties.slice(0, 3).join(', '))}</span>
         <span class="state">${esc(state)}</span></button>`;
     }).join('');
     setHTML($('model-picker'), html);
@@ -102,25 +110,34 @@
   function renderModelDependent() {
     const m = currentModel();
     if (!m) return;
-    if (!m.sizes.includes(S.size)) S.size = m.default_size;
+    const plan = currentPlan();
+    const maxSize = plan.max_size || Infinity;
+    if (!m.sizes.includes(S.size) || S.size > maxSize) S.size = Math.min(m.default_size, Math.max(...m.sizes.filter((s) => s <= maxSize), m.sizes[0]));
     setHTML($('size-picker'), m.sizes.map((s) =>
-      `<button type="button" role="radio" aria-checked="${s === S.size}" data-size="${s}" aria-label="${s} by ${s} pixels">${s} px</button>`).join(''));
+      `<button type="button" role="radio" aria-checked="${s === S.size}" data-size="${s}" aria-label="${s} by ${s} pixels" ${s > maxSize ? 'disabled title="Not in your plan"' : ''}>${s} px</button>`).join(''));
     setHTML($('examples'), m.examples.slice(0, 8).map((p) => `<button type="button" data-example="${esc(p)}" title="${esc(p)}">${esc(p)}</button>`).join(''));
-    setText($('prompt-hint'), HINTS[m.architecture] || '');
+    setText($('prompt-hint'), (HINTS[m.architecture] || '').replace('{name}', m.name) +
+      (m.palette ? COLOR_HINTS[m.architecture] || '' : ''));
     $('prompt').maxLength = 2000;
     document.querySelectorAll('[data-for]').forEach((n) => { n.hidden = n.dataset.for !== m.architecture; });
     const d = m.sample_defaults || {};
     $('temperature').placeholder = d.temperature ?? '';
     $('steps').placeholder = d.steps ?? '';
     $('guidance').placeholder = d.guidance ?? '';
-    const ok = !!m.weights;
+    const u = S.status.plan.usage;
+    const spent = u.limit !== null && u.remaining <= 0;
+    const ok = !!m.weights && m.in_plan && !spent;
     $('generate').disabled = !ok || S.busy;
-    $('generate').textContent = ok ? (S.busy ? 'Generating ...' : 'Generate') : 'No trained weights';
+    $('generate').textContent = !m.in_plan ? 'Not in your plan' : !m.weights ? 'No trained weights' : spent ? 'Daily limit reached'
+      : (S.busy ? 'Generating ...' : 'Generate');
+    setText($('quota'), `${plan.name} plan: ${u.images}${u.limit === null ? '' : ' of ' + u.limit} image${u.limit === 1 ? '' : 's'} today` +
+      (u.limit === null ? ' (no daily limit)' : '') + (m.in_plan ? '' : `. ${m.name} needs another plan: see the Plans tab.`));
   }
 
   $('model-picker').addEventListener('click', (e) => {
     const b = e.target.closest('[data-model]');
     if (!b) return;
+    if (b.dataset.locked === 'true') { show('plans'); return; }
     S.model = b.dataset.model;
     S.size = null;
     renderPicker();
@@ -186,8 +203,9 @@
     }
     if (job.status === 'done') {
       showProgress({ stage: 'done', fraction: 1 });
-      setBusy(false);
+      S.busy = false;
       showResult(job.result);
+      loadStatus();                    // refreshes today's image count
       return;
     }
     if (job.status === 'error') {
@@ -205,14 +223,19 @@
     const rows = [
       ['Model', meta.model_name],
       ['Prompt', meta.prompt],
-      ['Size', `${meta.size} x ${meta.size} px, 1 bit`],
+      ['Size', `${meta.size} x ${meta.size} px, ${meta.colors ? '6 colours' : '1 bit'}`],
       ['Seed', meta.seed],
     ];
     if (meta.tokens !== undefined) rows.push(['Program', `${meta.tokens} tokens, ${meta.program ? meta.program.ops : '?'} commands${meta.complete ? '' : ' (cut off at the token limit)'}`]);
     if (meta.steps !== undefined) rows.push(['Sampling', `${meta.steps} steps, guidance ${meta.guidance}${meta.refiner_passes ? ', ' + meta.refiner_passes + ' refiner pass' + (meta.refiner_passes > 1 ? 'es' : '') : ''}`]);
     if (meta.temperature !== undefined) rows.push(['Temperature', meta.temperature]);
     rows.push(['Time', `${meta.seconds} s`]);
-    rows.push(['Ink', `${(100 * (meta.ink_ratio || 0)).toFixed(1)}% black`]);
+    if (meta.colors) {
+      rows.push(['Colours', Object.entries(meta.colors).filter(([k, v]) => k !== 'white' && v > 0)
+        .map(([k, v]) => `${k} ${(100 * v).toFixed(1)}%`).join(', ') || 'none']);
+    } else {
+      rows.push(['Ink', `${(100 * (meta.ink_ratio || 0)).toFixed(1)}% black`]);
+    }
     if (meta.bytes) rows.push(['File', `${meta.file} (${bytes(meta.bytes)})`]);
     rows.push(['Weights', `${w.source || '?'}, ${epochsLine(w, w.target_epochs)}`]);
     if (meta.created) rows.push(['Created', meta.created.replace('T', ' ')]);
@@ -361,6 +384,7 @@
     return `<article class="card">
       <header><div><h2>${esc(m.name)}</h2><p>${esc(m.summary)}</p></div>
         <span class="badge ${w && w.source === 'installed' ? 'on' : ''}">${w ? (w.source === 'installed' ? 'installed' : 'checkpoint only') : 'no weights'}</span></header>
+      ${m.in_plan ? '' : `<section><p><b>Not in the ${esc(currentPlan().name)} plan.</b> It can be trained, but generating with it needs a plan that includes it.</p></section>`}
       <section><h3>Training completed</h3>
         <div class="big"><b>${num(t.epochs_completed || 0)}</b><span>of ${num(t.target_epochs)} target epochs</span></div>
         <p class="sub">${t.epoch_progress > 0 ? (100 * t.epoch_progress).toFixed(1) + '% of the next epoch, ' : ''}${num(t.samples_seen || 0)} samples seen, status: ${esc(t.status)}</p>
@@ -381,7 +405,10 @@
       <section><h3>Training data</h3>${m.dataset
         ? `<p class="sub">${num(m.dataset.train_count)} training and ${num(m.dataset.val_count)} validation samples prepared.</p><ul class="plain">${sources}</ul>`
         : `<p>Not prepared. Run <code>python -m inkos data prepare --model ${esc(m.id)}</code></p>`}</section>
-      <section><h3>Built for</h3><p class="mono">${esc(m.architecture)}</p><div class="tags">${m.specialties.map((s) => `<span>${esc(s)}</span>`).join('')}</div></section>
+      <section><h3>Built for</h3><p class="mono">${esc(m.architecture)}${m.starts_from && modelById(m.starts_from) ? ', starts from ' + esc(modelById(m.starts_from).name) + ' weights' : ''}</p>
+        <div class="tags">${m.specialties.map((s) => `<span>${esc(s)}</span>`).join('')}</div>
+        ${m.palette ? `<div class="swatches" aria-label="Output palette">${m.palette.names.map((n, i) => `<span><i style="background:${esc(m.palette.hex[i])}"></i>${esc(n)}</span>`).join('')}</div>`
+          : '<p class="sub">Output: black and white, 1 bit per pixel.</p>'}</section>
     </article>`;
   }
 
@@ -503,6 +530,40 @@
   });
   $('training-refresh').addEventListener('click', loadTraining);
 
+  /* ------------------------------------------------------------------- plans */
+  function renderPlans() {
+    if (!S.status) return;
+    const P = S.status.plan;
+    const u = P.usage;
+    setText($('plan-usage'), `Used today: ${u.images}${u.limit === null ? ' (no daily limit)' : ' of ' + u.limit + ' images'}`);
+    setHTML($('plan-cards'), P.plans.map((p) => {
+      const on = p.id === P.current;
+      const models = S.status.models.map((m) => `<li><b>${p.models.includes(m.id) ? 'yes' : 'no'}</b>${esc(m.name)}${m.palette ? ' (colour)' : ''}</li>`).join('');
+      return `<article class="card ${on ? 'current' : ''}">
+        <header><div><h2>${esc(p.name)}</h2><p>${esc(p.tagline || '')}</p></div><span class="badge ${on ? 'on' : ''}">${on ? 'current plan' : 'available'}</span></header>
+        ${p.price ? `<section><div class="big"><b>${esc(p.price)}</b></div></section>` : ''}
+        <section><h3>Models</h3><ul class="plain">${models}</ul></section>
+        <section><table>
+          <tr><th>Largest size</th><td class="num">${p.max_size ? p.max_size + ' px' : 'any'}</td></tr>
+          <tr><th>Images per day</th><td class="num">${p.images_per_day === null ? 'unlimited' : num(p.images_per_day)}</td></tr>
+          <tr><th>Projects</th><td class="num">${p.projects === null ? 'unlimited' : num(p.projects)}</td></tr>
+          <tr><th>Training</th><td class="num">all models</td></tr></table></section>
+        <div class="cta"><button type="button" data-plan="${esc(p.id)}" ${on ? 'disabled' : ''}>${on ? 'In use' : 'Use this plan'}</button></div>
+      </article>`;
+    }).join(''));
+  }
+  $('plan-cards').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-plan]');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      await api('POST', '/api/plan', { plan: b.dataset.plan });
+      await loadStatus();
+      await loadProjects();
+      renderPlans();
+    } catch (err) { banner(err.message); }
+  });
+
   /* -------------------------------------------------------------------- tabs */
   function show(view) {
     S.view = view;
@@ -512,6 +573,7 @@
     if (view === 'models') loadStatus().then(renderModels);
     if (view === 'training') loadTraining();
     if (view === 'generate') loadStatus();
+    if (view === 'plans') loadStatus().then(renderPlans);
     try { window.history.replaceState(null, '', `#${view}`); } catch (e) { /* file:// */ }
   }
   document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -528,6 +590,6 @@
     await loadStatus();
     await loadProjects();
     const want = (window.location.hash || '').slice(1);
-    show(['generate', 'gallery', 'models', 'training'].includes(want) ? want : 'generate');
+    show(['generate', 'gallery', 'models', 'training', 'plans'].includes(want) ? want : 'generate');
   })();
 })();

@@ -13,6 +13,9 @@ Output distribution at each program step is a single softmax over
 A pointer pair marks a span of the prompt to be written on the page, so text
 the user typed is quoted verbatim rather than re-spelled by the network.
 
+INKOS 1.1 is the same network with `color: true`: six more tokens select the
+pen colour, and the program is rasterised in the six-colour E-Ink palette.
+
 Generation runs with key/value caching and, by default, a grammar mask
 (inkos.vector.lang.Grammar) so every sampled program can be rendered.
 """
@@ -37,11 +40,15 @@ class Inkos1Config:
     max_prompt: int = 256
     max_program: int = 320
     dropout: float = 0.0
+    color: bool = False            # INKOS 1.1: six extra colour tokens
     vocab: int = lang.VOCAB
 
     @classmethod
     def from_dict(cls, d: dict) -> "Inkos1Config":
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        kw = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        if kw.get("color"):
+            kw["vocab"] = lang.VOCAB_COLOR
+        return cls(**kw)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -199,7 +206,7 @@ class Inkos1(nn.Module):
         for blk, c in zip(self.blocks, caches):
             x = blk.step(x, c)
         keys = self.ptr_k(self.norm(x))                                  # [1, P, D]
-        grammar = lang.Grammar(P)
+        grammar = lang.Grammar(P, cfg.vocab)
         out: list[int] = []
         tok = lang.BOS
         for step in range(max_tokens):

@@ -11,15 +11,39 @@ import math
 
 import numpy as np
 
+from .. import palette
+from ..palette import BLACK, BLUE, GREEN, RED, WHITE, YELLOW
 from ..vector.font import ADV, glyph
 from .manga_chars import (character_tags, draw_character, draw_chibi, ell, pick, sample_character,
                           short_description)
-from .manga_draw import Ink, frame
+from .manga_draw import ColorInk, Ink, frame
 
 KINDS = ["portrait", "chibi", "scene", "page", "object", "composition", "import"]
 BUBBLE_WORDS = ("...", "!?", "OK!", "NO!", "HEY", "WOW", "YES", "HUH?", "WAIT", "GO!", "HA HA", "WHAT?", "HM...",
                 "OH!", "RUN!", "HELLO", "LOOK!", "NICE", "THANKS", "SORRY", "WHY?", "NOW!")
 SFX_WORDS = ("BAM", "DON", "ZAA", "GOGO", "WHAM", "ZOOM", "CRASH", "BOOM", "SWISH", "THUD")
+
+
+def new_ink(w: int, h: int, color: bool) -> Ink:
+    return ColorInk(w, h) if color else Ink(w, h)
+
+
+def col(ink: Ink, rng, mono: tuple, *choices) -> tuple:
+    """(fill, screentone) for a surface: `mono` on a black-and-white canvas,
+    one of the palette `choices` on a colour canvas."""
+    if ink.is_color:
+        return (choices[int(rng.integers(len(choices)))], 0.0)
+    return mono
+
+
+def sky(ink: Ink, rng, bottom: float) -> str | None:
+    """Colour canvases only: paint the sky down to `bottom`. Returns a caption tag."""
+    if not ink.is_color:
+        return None
+    c = pick(rng, (BLUE, BLUE, BLUE, YELLOW, WHITE))
+    if c != WHITE:
+        ink.fill([(0, 0), (ink.w, 0), (ink.w, bottom), (0, bottom)], c)
+    return {BLUE: "blue sky", YELLOW: "yellow sky", WHITE: None}[c]
 
 
 # --------------------------------------------------------------------------
@@ -36,11 +60,11 @@ def text(ink: Ink, x, y, size, s: str, width: float = 1.6, color: int = 0, rot: 
             ink.line(np.stack([x + gx * c - gy * sn, y + gx * sn + gy * c], axis=1), width, color)
 
 
-def cloud(ink: Ink, rng, cx, cy, w, tone: float = 0.0):
+def cloud(ink: Ink, rng, cx, cy, w, tone: float = 0.0, fill: int = 255):
     h = w * rng.uniform(0.28, 0.4)
     pts = [(cx - w / 2, cy + h * 0.4), (cx - w * 0.36, cy - h * 0.1), (cx - w * 0.2, cy - h * 0.5),
            (cx + w * 0.05, cy - h * 0.62), (cx + w * 0.27, cy - h * 0.3), (cx + w * 0.47, cy), (cx + w / 2, cy + h * 0.4)]
-    ink.shape(pts, 255, tone, 1.8, smooth=True)
+    ink.shape(pts, fill, tone, 1.8, smooth=True)
 
 
 def star4(ink: Ink, cx, cy, r, color=0):
@@ -55,15 +79,16 @@ def star4(ink: Ink, cx, cy, r, color=0):
 def pine(ink: Ink, x, base, h, black=False):
     ink.shape([(x - h * 0.04, base), (x + h * 0.04, base), (x + h * 0.04, base - h * 0.2), (x - h * 0.04, base - h * 0.2)], 0, 0, 0)
     for k, (top, wd, bot) in enumerate(((1.0, 0.16, 0.62), (0.75, 0.24, 0.36), (0.5, 0.32, 0.12))):
-        ink.shape([(x, base - h * top), (x + h * wd, base - h * bot), (x - h * wd, base - h * bot)],
-                  0 if black else 255, 0 if black else 0.3, 1.6)
+        f, t = (0, 0) if black else ((GREEN, 0) if ink.is_color else (255, 0.3))
+        ink.shape([(x, base - h * top), (x + h * wd, base - h * bot), (x - h * wd, base - h * bot)], f, t, 1.6)
 
 
 def round_tree(ink: Ink, rng, x, base, h):
     ink.shape([(x - h * 0.05, base), (x + h * 0.05, base), (x + h * 0.035, base - h * 0.5), (x - h * 0.035, base - h * 0.5)], 255, 0, 1.6)
     crown = [(x + h * 0.36 * math.cos(a) * rng.uniform(0.85, 1.1), base - h * 0.68 + h * 0.3 * math.sin(a) * rng.uniform(0.85, 1.1))
              for a in np.linspace(0, 2 * math.pi, 9, endpoint=False)]
-    ink.shape(crown, 255, pick(rng, (0.0, 0.3, 0.45)), 1.8, smooth=True)
+    tone = pick(rng, (0.0, 0.3, 0.45))
+    ink.shape(crown, GREEN if ink.is_color else 255, tone, 1.8, smooth=True)
 
 
 def bubble(ink: Ink, rng, cx, cy, rx, ry, tail_to=None, kind: str | None = None, word: str | None = None):
@@ -101,7 +126,7 @@ def sfx(ink: Ink, rng, x, y, size):
     word = pick(rng, SFX_WORDS)
     rot = rng.uniform(-0.35, 0.1)
     text(ink, x, y, size, word, size * 0.2, 255, rot)
-    text(ink, x, y, size, word, size * 0.13, 0, rot)
+    text(ink, x, y, size, word, size * 0.13, pick(rng, (RED, RED, BLUE, BLACK)) if ink.is_color else 0, rot)
     return word
 
 
@@ -136,16 +161,24 @@ def fx_tone(ink: Ink, rng):
     if rng.random() < 0.5:
         a, b = b, a
     ink.tone_gradient(0, 0, W, H, a, b, vertical=rng.random() < 0.7)
+    if ink.is_color:
+        ink.fill([(0, 0), (W, 0), (W, H), (0, H)], pick(rng, (YELLOW, BLUE, GREEN, RED)))
 
 
 def fx_sparkles(ink: Ink, rng):
     W, H = ink.w, ink.h
+    spark = 0
     if rng.random() < 0.4:
         ink.tone_gradient(0, 0, W, H, 0.35, 0.1)
+        if ink.is_color:
+            ink.fill([(0, 0), (W, 0), (W, H), (0, H)], pick(rng, (BLUE, RED, GREEN)))
+            spark = YELLOW
+    elif ink.is_color:
+        spark = pick(rng, (RED, BLUE, BLACK))
     for _ in range(int(rng.integers(7, 16))):
         x, y, r = rng.uniform(0, W), rng.uniform(0, H), rng.uniform(0.02, 0.07) * min(W, H)
         if rng.random() < 0.65:
-            star4(ink, x, y, r, 0)
+            star4(ink, x, y, r, spark)
         else:
             ink.ellipse(x, y, r * 0.5, r * 0.5, 255, 0, 1.6)
 
@@ -154,17 +187,22 @@ def fx_flowers(ink: Ink, rng):
     W, H = ink.w, ink.h
     for _ in range(int(rng.integers(5, 11))):
         x, y, r = rng.uniform(0, W), rng.uniform(0, H), rng.uniform(0.035, 0.075) * min(W, H)
+        petal = pick(rng, (RED, YELLOW, WHITE, BLUE)) if ink.is_color else 255
+        heart = (RED if petal == YELLOW else YELLOW) if ink.is_color else 0
         for k in range(5):
             a = 2 * math.pi * k / 5 + 0.3
-            ink.ellipse(x + r * math.cos(a), y + r * math.sin(a), r * 0.62, r * 0.62, 255, 0, 1.5)
-        ink.ellipse(x, y, r * 0.34, r * 0.34, 0, 0, 0)
+            ink.ellipse(x + r * math.cos(a), y + r * math.sin(a), r * 0.62, r * 0.62, petal, 0, 1.5)
+        ink.ellipse(x, y, r * 0.34, r * 0.34, heart, 0, 0)
 
 
 def fx_burst(ink: Ink, rng):
     W, H = ink.w, ink.h
-    ink.fill([(0, 0), (W, 0), (W, H), (0, H)], 0 if rng.random() < 0.5 else 255, 0.0 if rng.random() < 0.5 else 0.5)
-    if ink.img.getpixel((0, 0)) == 255 and ink.tone.getpixel((0, 0)) == 0:
-        ink.tone_only([(0, 0), (W, 0), (W, H), (0, H)], 0.5)
+    if ink.is_color:
+        ink.fill([(0, 0), (W, 0), (W, H), (0, H)], pick(rng, (RED, YELLOW, BLUE, BLACK)))
+    else:
+        ink.fill([(0, 0), (W, 0), (W, H), (0, H)], 0 if rng.random() < 0.5 else 255, 0.0 if rng.random() < 0.5 else 0.5)
+        if ink.img.getpixel((0, 0)) == 255 and ink.tone.getpixel((0, 0)) == 0:
+            ink.tone_only([(0, 0), (W, 0), (W, H), (0, H)], 0.5)
     pts = []
     for i in range(36):
         r = (0.5 if i % 2 == 0 else rng.uniform(0.62, 0.78)) * max(W, H)
@@ -202,9 +240,15 @@ def _skyline(ink: Ink, rng, base, max_h, min_w=36, max_w=92, style="mixed"):
         bh = rng.uniform(0.3, 1.0) * max_h
         st = pick(rng, ("white", "tone", "black")) if style == "mixed" else style
         fill, tone = {"white": (255, 0.0), "tone": (255, 0.35), "black": (0, 0.0)}[st]
+        lit = 0 if st == "white" else 255
+        if ink.is_color and st != "black":
+            fill = BLUE if style == "tone" else pick(rng, (WHITE, YELLOW, RED, GREEN, BLUE))
+            tone, lit = 0.0, (YELLOW if fill in palette.DARK else BLUE)
+        elif ink.is_color:
+            lit = YELLOW
         ink.shape([(x, base), (x, base - bh), (x + bw, base - bh), (x + bw, base)], fill, tone, 2.0)
         if bh > 40 and bw > 24:
-            _windows(ink, rng, x + 4, base - bh + 6, x + bw - 4, base - 4, 0 if st == "white" else 255, 0 if st == "black" else 1.0)
+            _windows(ink, rng, x + 4, base - bh + 6, x + bw - 4, base - 4, lit, 0 if st == "black" else 1.0)
         if rng.random() < 0.3:
             ink.line([(x + bw * 0.5, base - bh), (x + bw * 0.5, base - bh - rng.uniform(10, 30))], 1.6)
         x += bw + rng.uniform(-4, 10)
@@ -214,16 +258,18 @@ def scene_skyline(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     tags = ["city skyline"]
     hz = H * rng.uniform(0.62, 0.8)
-    if rng.random() < 0.5:
+    if ink.is_color:
+        tags += [t for t in (sky(ink, rng, hz + H * 0.04),) if t]
+    elif rng.random() < 0.5:
         ink.tone_gradient(0, 0, W, hz, rng.uniform(0.3, 0.6), 0.0)
         tags.append("evening sky")
     r = min(W, H) * rng.uniform(0.06, 0.11)
-    ink.ellipse(W * rng.uniform(0.15, 0.85), H * rng.uniform(0.12, 0.3), r, r, 255, 0, 2.0)
+    ink.ellipse(W * rng.uniform(0.15, 0.85), H * rng.uniform(0.12, 0.3), r, r, *col(ink, rng, (255, 0), YELLOW, RED, WHITE), 2.0)
     for _ in range(int(rng.integers(1, 4))):
         cloud(ink, rng, rng.uniform(0, W), H * rng.uniform(0.08, 0.4), W * rng.uniform(0.18, 0.34))
     _skyline(ink, rng, hz, H * 0.32, style="tone")
     _skyline(ink, rng, hz + H * 0.04, H * 0.5)
-    ink.fill([(0, hz + H * 0.04), (W, hz + H * 0.04), (W, H), (0, H)], 255)
+    ink.fill([(0, hz + H * 0.04), (W, hz + H * 0.04), (W, H), (0, H)], col(ink, rng, (255, 0), WHITE, GREEN, BLUE)[0])
     ink.line([(0, hz + H * 0.04), (W, hz + H * 0.04)], 2.2)
     for k in range(int(rng.integers(3, 8))):
         y = hz + H * 0.07 + k * H * 0.03
@@ -239,7 +285,11 @@ def scene_street(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     vx, vy = W * rng.uniform(0.38, 0.62), H * rng.uniform(0.36, 0.5)
     lerp = lambda a, b, t: (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-    if rng.random() < 0.4:
+    tags = ["city street", "perspective"]
+    if ink.is_color:
+        tags += [t for t in (sky(ink, rng, H),) if t]
+        ink.fill([(vx, vy), (0, H), (W, H)], WHITE)
+    elif rng.random() < 0.4:
         ink.tone_gradient(0, 0, W, vy, 0.4, 0.05)
     for _ in range(int(rng.integers(1, 3))):
         cloud(ink, rng, rng.uniform(0.2, 0.8) * W, vy * rng.uniform(0.2, 0.7), W * rng.uniform(0.15, 0.3))
@@ -251,7 +301,9 @@ def scene_street(ink: Ink, rng) -> list[str]:
             a, b = (xe, top), (xe, float(H))
             quad = [lerp(a, (vx, vy), t0), lerp(a, (vx, vy), t1), lerp(b, (vx, vy), t1), lerp(b, (vx, vy), t0)]
             tone = pick(rng, (0.0, 0.0, 0.3, 0.45)) if side == 1 else pick(rng, (0.0, 0.0, 0.25))
-            ink.shape(quad, 255, tone, 2.2)
+            wall = pick(rng, (WHITE, YELLOW, RED, GREEN, BLUE)) if ink.is_color else 255
+            glass = (YELLOW if wall in palette.DARK else BLUE) if ink.is_color else 0
+            ink.shape(quad, wall, tone, 2.2)
             rows, cols = int(rng.integers(3, 7)), int(rng.integers(2, 5))
             for r in range(rows):
                 for c in range(cols):
@@ -260,7 +312,7 @@ def scene_street(ink: Ink, rng) -> list[str]:
                     sa, sb = (r + 0.2) / (rows + 0.6), (r + 0.72) / (rows + 0.6)
                     pa, pb = lerp(a, b, sa), lerp(a, b, sb)
                     ink.shape([lerp(pa, (vx, vy), ta), lerp(pa, (vx, vy), tb), lerp(pb, (vx, vy), tb), lerp(pb, (vx, vy), ta)],
-                              0 if rng.random() < 0.3 else 255, 0, 1.2)
+                              glass if rng.random() < 0.3 else 255, 0, 1.2)
             t0 = t1
     ink.line([(vx, vy), (W * 0.18, H)], 2.0)
     ink.line([(vx, vy), (W * 0.82, H)], 2.0)
@@ -269,7 +321,7 @@ def scene_street(ink: Ink, rng) -> list[str]:
         m = (W * 0.5, float(H))
         p, q2 = lerp(m, (vx, vy), ta), lerp(m, (vx, vy), tb)
         ink.stroke([p, q2], max(1.0, 6 * (1 - ta)), 0, 0.6)
-    return ["city street", "perspective"]
+    return tags
 
 
 def scene_room(ink: Ink, rng) -> list[str]:
@@ -278,7 +330,13 @@ def scene_room(ink: Ink, rng) -> list[str]:
     tags = ["room interior"]
     if rng.random() < 0.5:
         ink.tone_only([(0, 0), (x0, y0), (x0, y1), (0, H)], 0.3)
-    ink.shape([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], 255, 0, 2.2)
+    if ink.is_color:
+        wall = pick(rng, (WHITE, YELLOW, GREEN, BLUE, RED))
+        ink.fill([(0, 0), (W, 0), (W, H), (0, H)], wall)
+        ink.fill([(x0, y1), (x1, y1), (W, H), (0, H)], pick(rng, (WHITE, YELLOW)))
+        if wall != WHITE:
+            tags.append(f"{palette.NAMES[wall]} walls")
+    ink.shape([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], wall if ink.is_color else 255, 0, 2.2)
     for a, b in (((x0, y0), (0, 0)), ((x1, y0), (W, 0)), ((x0, y1), (0, H)), ((x1, y1), (W, H))):
         ink.line([a, b], 2.2)
     for k in range(1, 7):
@@ -286,6 +344,8 @@ def scene_room(ink: Ink, rng) -> list[str]:
         ink.line([(xb, y1), (W * (-0.6 + 2.2 * k / 7), H)], 1.1)
     wx0, wy0, wx1, wy1 = W * 0.34, H * 0.27, W * 0.58, H * 0.52
     ink.tone_gradient(wx0, wy0, wx1, wy1, 0.3, 0.05)
+    if ink.is_color:
+        ink.fill([(wx0, wy0), (wx1, wy0), (wx1, wy1), (wx0, wy1)], BLUE)
     cloud(ink, rng, (wx0 + wx1) / 2, wy0 + (wy1 - wy0) * 0.4, (wx1 - wx0) * 0.6)
     ink.fill([(x0, y0), (wx0, y0), (wx0, y1), (x0, y1)], None, 0)
     ink.line([(wx0, wy0), (wx1, wy0), (wx1, wy1), (wx0, wy1)], 2.6, closed=True)
@@ -295,12 +355,13 @@ def scene_room(ink: Ink, rng) -> list[str]:
     if rng.random() < 0.6:
         for sx, dx in ((wx0, -1), (wx1, 1)):
             ink.shape([(sx, wy0 - 6), (sx + dx * W * 0.06, wy0 - 6), (sx + dx * W * 0.045, wy1 + 14), (sx + dx * W * 0.01, wy1 + 8)],
-                      255, 0.25, 1.8, smooth=False)
+                      RED if ink.is_color else 255, 0.25, 1.8, smooth=False)
         tags.append("curtains")
     if rng.random() < 0.7:
         dx0, dx1, dy = W * 0.6, W * 0.95, H * 0.7
         ink.shape([(dx0, dy), (dx1, dy + H * 0.03), (dx1, dy + H * 0.07), (dx0, dy + H * 0.04)], 255, 0, 2.0)
-        ink.shape([(dx0 - W * 0.04, dy - H * 0.035), (dx1 - W * 0.02, dy - H * 0.02), (dx1, dy + H * 0.03), (dx0, dy)], 255, 0.2, 2.0)
+        ink.shape([(dx0 - W * 0.04, dy - H * 0.035), (dx1 - W * 0.02, dy - H * 0.02), (dx1, dy + H * 0.03), (dx0, dy)],
+                  YELLOW if ink.is_color else 255, 0.2, 2.0)
         ink.line([(dx0 + 4, dy + H * 0.04), (dx0 + 4, H * 0.95)], 2.2)
         ink.line([(dx1 - 4, dy + H * 0.07), (dx1 - 4, H)], 2.2)
         tags.append("desk")
@@ -315,7 +376,7 @@ def scene_room(ink: Ink, rng) -> list[str]:
                 bw = rng.uniform(4, 9)
                 top = sy0 + (sy1 - sy0) * k / 3 + rng.uniform(4, 9)
                 ink.shape([(x, top), (x + bw, top), (x + bw, sy0 + (sy1 - sy0) * (k + 1) / 3), (x, sy0 + (sy1 - sy0) * (k + 1) / 3)],
-                          pick(rng, (255, 255, 0)), 0, 1.0)
+                          pick(rng, (RED, YELLOW, BLUE, GREEN, 255) if ink.is_color else (255, 255, 0)), 0, 1.0)
                 x += bw
         tags.append("bookshelf")
     return tags
@@ -325,11 +386,13 @@ def scene_landscape(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     tags = ["landscape", "mountains"]
     hz = H * rng.uniform(0.52, 0.66)
-    if rng.random() < 0.4:
+    if ink.is_color:
+        tags += [t for t in (sky(ink, rng, hz),) if t]
+    elif rng.random() < 0.4:
         ink.tone_gradient(0, 0, W, hz, 0.35, 0.0)
     r = min(W, H) * 0.07
     sx, sy = W * rng.uniform(0.15, 0.85), H * rng.uniform(0.1, 0.25)
-    ink.ellipse(sx, sy, r, r, 255, 0, 2.0)
+    ink.ellipse(sx, sy, r, r, *col(ink, rng, (255, 0), YELLOW, RED), 2.0)
     for _ in range(int(rng.integers(1, 4))):
         cloud(ink, rng, rng.uniform(0, W), H * rng.uniform(0.08, 0.3), W * rng.uniform(0.16, 0.3))
     for layer in range(2):
@@ -340,16 +403,17 @@ def scene_landscape(ink: Ink, rng) -> list[str]:
             ridge.append((x - W * 0.08, hz - H * rng.uniform(0.18, 0.4) * (1 - 0.35 * layer)))
             ridge.append((x, hz - H * rng.uniform(0.02, 0.1)))
         ridge.append((W * 1.2, hz))
-        ink.shape(ridge, 255, 0.3 if layer == 0 else 0.0, 2.0)
+        peak = (BLUE if layer == 0 else pick(rng, (GREEN, WHITE))) if ink.is_color else 255
+        ink.shape(ridge, peak, 0.3 if layer == 0 else 0.0, 2.0)
         if layer == 1:
             for i in range(1, len(ridge) - 1, 2):
                 px, py = ridge[i]
                 for k in range(4):
                     ink.line([(px + 6 + k * 9, py + 14 + k * 12), (px + 2 + k * 7, hz - 2)], 1.0)
-    ink.fill([(0, hz), (W, hz), (W, H), (0, H)], 255)
+    ink.fill([(0, hz), (W, hz), (W, H), (0, H)], col(ink, rng, (255, 0), GREEN, GREEN, WHITE, YELLOW)[0])
     ink.line([(0, hz), (W, hz)], 2.0)
     if rng.random() < 0.5:
-        ink.shape(ell(W * rng.uniform(0.3, 0.7), hz + H * 0.14, W * 0.3, H * 0.07), 255, 0.15, 1.8)
+        ink.shape(ell(W * rng.uniform(0.3, 0.7), hz + H * 0.14, W * 0.3, H * 0.07), BLUE if ink.is_color else 255, 0.15, 1.8)
         tags.append("lake")
     else:
         px = W * rng.uniform(0.3, 0.7)
@@ -375,28 +439,34 @@ def scene_sea(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     hz = H * rng.uniform(0.4, 0.55)
     tags = ["sea", "horizon"]
-    if rng.random() < 0.5:
+    if ink.is_color:
+        tags += [t for t in (sky(ink, rng, hz),) if t]
+    elif rng.random() < 0.5:
         ink.tone_gradient(0, 0, W, hz, 0.4, 0.05)
         tags.append("sunset")
     sx, r = W * rng.uniform(0.25, 0.75), min(W, H) * rng.uniform(0.08, 0.14)
-    ink.ellipse(sx, hz - r * rng.uniform(0.0, 1.2), r, r, 255, 0, 2.2)
+    ink.ellipse(sx, hz - r * rng.uniform(0.0, 1.2), r, r, *col(ink, rng, (255, 0), YELLOW, RED), 2.2)
     for _ in range(int(rng.integers(1, 4))):
         cloud(ink, rng, rng.uniform(0, W), hz * rng.uniform(0.15, 0.6), W * rng.uniform(0.16, 0.3))
-    ink.fill([(0, hz), (W, hz), (W, H), (0, H)], 255)
+    water = BLUE if ink.is_color else 255
+    foam = 255 if ink.is_color else 0
+    ink.fill([(0, hz), (W, hz), (W, H), (0, H)], water)
     ink.line([(0, hz), (W, hz)], 2.0)
     for k in range(9):
         y = hz + 6 + (H - hz) * (k / 9) ** 1.4
         half = 4 + k * 5
-        ink.line([(sx - half, y), (sx + half, y)], 1.0 + k * 0.25)
+        ink.line([(sx - half, y), (sx + half, y)], 1.0 + k * 0.25, YELLOW if ink.is_color else 0)
     for k in range(int(rng.integers(12, 26))):
         f = rng.uniform(0, 1)
         y, x, s = hz + 8 + (H - hz - 12) * f, rng.uniform(0, W), 8 + 26 * f
-        ink.curve([(x - s, y), (x - s * 0.4, y - s * 0.22), (x, y), (x + s * 0.5, y - s * 0.2), (x + s, y)], 1.2 + f, taper=0.2)
+        ink.curve([(x - s, y), (x - s * 0.4, y - s * 0.22), (x, y), (x + s * 0.5, y - s * 0.2), (x + s, y)], 1.2 + f,
+                  color=foam, taper=0.2)
     if rng.random() < 0.6:
         bx, by, s = W * rng.uniform(0.15, 0.85), hz + (H - hz) * rng.uniform(0.1, 0.4), H * rng.uniform(0.07, 0.13)
         ink.shape([(bx - s, by), (bx + s, by), (bx + s * 0.65, by + s * 0.4), (bx - s * 0.65, by + s * 0.4)], 255, 0, 2.0)
         ink.line([(bx, by), (bx, by - s * 1.5)], 2.0)
-        ink.shape([(bx + 3, by - s * 1.45), (bx + s * 0.85, by - s * 0.15), (bx + 3, by - s * 0.15)], 255, 0.2, 1.8)
+        ink.shape([(bx + 3, by - s * 1.45), (bx + s * 0.85, by - s * 0.15), (bx + 3, by - s * 0.15)],
+                  *col(ink, rng, (255, 0.2), RED, YELLOW, WHITE), 1.8)
         tags.append("sailboat")
     for _ in range(int(rng.integers(0, 5))):
         x, y, s = rng.uniform(0, W), rng.uniform(0.05, 0.8) * hz, rng.uniform(5, 10)
@@ -410,13 +480,14 @@ def scene_night(ink: Ink, rng) -> list[str]:
     ink.fill([(0, 0), (W, 0), (W, H), (0, H)], 0)
     for _ in range(int(rng.integers(40, 110))):
         x, y = rng.uniform(0, W), rng.uniform(0, H * 0.8)
+        glow = YELLOW if ink.is_color else 255
         if rng.random() < 0.15:
-            star4(ink, x, y, rng.uniform(4, 9), 255)
+            star4(ink, x, y, rng.uniform(4, 9), glow)
         else:
             r = rng.uniform(0.8, 1.8)
             ink.ellipse(x, y, r, r, 255, 0, 0, n=8)
     mx, my, r = W * rng.uniform(0.2, 0.8), H * rng.uniform(0.12, 0.3), min(W, H) * rng.uniform(0.07, 0.12)
-    ink.ellipse(mx, my, r, r, 255, 0, 0)
+    ink.ellipse(mx, my, r, r, YELLOW if ink.is_color else 255, 0, 0)
     if rng.random() < 0.6:
         ink.ellipse(mx + r * 0.45, my - r * 0.15, r * 0.9, r * 0.9, 0, 0, 0)
         tags.append("crescent moon")
@@ -432,7 +503,7 @@ def scene_night(ink: Ink, rng) -> list[str]:
             ridge.append((x, base - rng.uniform(0, H * 0.14)))
             x += W * rng.uniform(0.08, 0.2)
         ridge.append((W + 10.0, float(H)))
-        ink.shape(ridge, 255, 0.55, 2.0, smooth=False)
+        ink.shape(ridge, *col(ink, rng, (255, 0.55), BLUE, GREEN), 2.0, smooth=False)
         for _ in range(int(rng.integers(2, 6))):
             pine(ink, rng.uniform(0, W), H * rng.uniform(0.9, 1.0), H * rng.uniform(0.18, 0.3), True)
         tags.append("hills")
@@ -442,7 +513,10 @@ def scene_night(ink: Ink, rng) -> list[str]:
 def scene_shrine(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     hz = H * 0.7
-    if rng.random() < 0.5:
+    tags = ["shrine gate", "stone steps", "trees"]
+    if ink.is_color:
+        tags += [t for t in (sky(ink, rng, hz),) if t]
+    elif rng.random() < 0.5:
         ink.tone_gradient(0, 0, W, hz, 0.3, 0.0)
     for _ in range(int(rng.integers(1, 3))):
         cloud(ink, rng, rng.uniform(0, W), H * rng.uniform(0.08, 0.25), W * rng.uniform(0.16, 0.3))
@@ -453,6 +527,9 @@ def scene_shrine(ink: Ink, rng) -> list[str]:
     ink.line([(0, hz), (W, hz)], 2.0)
     black = rng.random() < 0.5
     col, tone = (0, 0) if black else (255, 0.3)
+    if ink.is_color:
+        col, tone = RED, 0
+        tags.insert(0, "red shrine gate")
     cx, gw, top = W * 0.5, W * 0.56, H * 0.26
     for sgn in (-1, 1):
         px = cx + sgn * gw * 0.36
@@ -466,12 +543,15 @@ def scene_shrine(ink: Ink, rng) -> list[str]:
         ink.line([(cx - half, y), (cx + half, y)], 1.6)
     ink.line([(cx - gw * 0.3, hz + H * 0.06), (cx - gw * 0.65, H)], 1.6)
     ink.line([(cx + gw * 0.3, hz + H * 0.06), (cx + gw * 0.65, H)], 1.6)
-    return ["shrine gate", "stone steps", "trees"]
+    return tags
 
 
 def scene_forest(ink: Ink, rng) -> list[str]:
     W, H = ink.w, ink.h
     ink.tone_gradient(0, 0, W, H * 0.5, 0.5, 0.1)
+    if ink.is_color:
+        ink.fill([(0, 0), (W, 0), (W, H), (0, H)], pick(rng, (GREEN, GREEN, BLUE, YELLOW)))
+        ink.fill([(0, H * 0.78), (W, H * 0.78), (W, H), (0, H)], pick(rng, (WHITE, YELLOW, GREEN)))
     ground = H * 0.78
     for depth in (0, 1, 2):
         n = (7, 5, 3)[depth]
@@ -485,9 +565,10 @@ def scene_forest(ink: Ink, rng) -> list[str]:
                 ink.line([(x - tw * 0.4, yy), (x - tw * 0.2, yy + rng.uniform(12, 40))], 1.0)
     for _ in range(int(rng.integers(8, 16))):
         x, y = rng.uniform(0, W), rng.uniform(ground, H)
-        ink.shape(ell(x, y, W * rng.uniform(0.04, 0.09), H * rng.uniform(0.02, 0.045), 12), 255, pick(rng, (0.0, 0.3)), 1.5, smooth=True)
+        bush = pick(rng, (0.0, 0.3))
+        ink.shape(ell(x, y, W * rng.uniform(0.04, 0.09), H * rng.uniform(0.02, 0.045), 12), GREEN if ink.is_color else 255, bush, 1.5, smooth=True)
     for _ in range(int(rng.integers(3, 6))):
-        cloud(ink, rng, rng.uniform(0, W), H * rng.uniform(0.0, 0.14), W * rng.uniform(0.3, 0.5), 0.45)
+        cloud(ink, rng, rng.uniform(0, W), H * rng.uniform(0.0, 0.14), W * rng.uniform(0.3, 0.5), 0.45, GREEN if ink.is_color else 255)
     return ["forest", "tree trunks", "undergrowth"]
 
 
@@ -517,10 +598,10 @@ def obj_sakura(ink: Ink, rng) -> list[str]:
         for k in range(5):
             a = 2 * math.pi * k / 5 + rng.uniform(0, 1)
             ink.shape(ell(ex + r * math.cos(a), ey + r * math.sin(a), r * 0.7, r * 0.55, 12), 255, 0, 1.6)
-        ink.ellipse(ex, ey, r * 0.3, r * 0.3, 0, 0, 0, n=10)
+        ink.ellipse(ex, ey, r * 0.3, r * 0.3, RED if ink.is_color else 0, 0, 0, n=10)
     for _ in range(int(rng.integers(4, 12))):
         x, y, r = rng.uniform(0, W), rng.uniform(0, H), W * 0.014
-        ink.shape(ell(x, y, r * 1.5, r, 10), 255, 0, 1.3)
+        ink.shape(ell(x, y, r * 1.5, r, 10), RED if ink.is_color else 255, 0, 1.3)
     return ["cherry blossom branch", "petals", "line art"]
 
 
@@ -533,8 +614,8 @@ def obj_katana(ink: Ink, rng) -> list[str]:
     blade_bot = [T(u, 0.016 - 0.03 * (u + 0.18) ** 2) for u in np.linspace(0.41, -0.18, 12)]
     ink.shape(blade_top + blade_bot, 255, 0, 2.2)
     ink.line([T(u, 0.004 - 0.03 * (u + 0.18) ** 2) for u in np.linspace(-0.18, 0.4, 10)], 1.0)
-    ink.shape([T(-0.19, -0.045), T(-0.175, -0.045), T(-0.175, 0.05), T(-0.19, 0.05)], 0, 0, 2.0)
-    ink.shape([T(-0.42, -0.02), T(-0.19, -0.016), T(-0.19, 0.022), T(-0.42, 0.024)], 0, 0, 2.0)
+    ink.shape([T(-0.19, -0.045), T(-0.175, -0.045), T(-0.175, 0.05), T(-0.19, 0.05)], YELLOW if ink.is_color else 0, 0, 2.0)
+    ink.shape([T(-0.42, -0.02), T(-0.19, -0.016), T(-0.19, 0.022), T(-0.42, 0.024)], *col(ink, rng, (0, 0), RED, BLUE, BLACK), 2.0)
     for k in range(7):
         u = -0.41 + k * 0.031
         ink.shape([T(u, 0.002), T(u + 0.014, -0.012), T(u + 0.028, 0.002), T(u + 0.014, 0.016)], 255, 0, 0)
@@ -546,6 +627,8 @@ def obj_cat(ink: Ink, rng) -> list[str]:
     cx, s = W * 0.5, min(W, H) * 0.3
     black = rng.random() < 0.4
     col, tone = (0, 0.0) if black else (255, pick(rng, (0.0, 0.3)))
+    if ink.is_color and not black:
+        col, tone = pick(rng, (WHITE, YELLOW)), 0.0
     by = H * 0.66
     ink.curve([(cx + s * 0.55, by + s * 0.55), (cx + s * 1.15, by + s * 0.5), (cx + s * 1.2, by - s * 0.2), (cx + s * 0.95, by - s * 0.45)], s * 0.16, taper=0.5)
     ink.shape([(cx - s * 0.62, by + s * 0.7), (cx - s * 0.6, by - s * 0.1), (cx, by - s * 0.5), (cx + s * 0.6, by - s * 0.1), (cx + s * 0.66, by + s * 0.7)],
@@ -568,7 +651,8 @@ def obj_lantern(ink: Ink, rng) -> list[str]:
     cx, cy, rx, ry = W * 0.5, H * 0.5, W * 0.22, H * 0.27
     ink.line([(cx, 0), (cx, cy - ry - H * 0.05)], 2.0)
     ink.shape([(cx - rx * 0.45, cy - ry - H * 0.05), (cx + rx * 0.45, cy - ry - H * 0.05), (cx + rx * 0.45, cy - ry + 4), (cx - rx * 0.45, cy - ry + 4)], 0, 0, 2.0)
-    ink.ellipse(cx, cy, rx, ry, 255, pick(rng, (0.0, 0.2)), 2.4)
+    paper = pick(rng, (0.0, 0.2))
+    ink.ellipse(cx, cy, rx, ry, pick(rng, (RED, RED, YELLOW)) if ink.is_color else 255, paper, 2.4)
     for k in range(1, 8):
         y = cy - ry + 2 * ry * k / 8
         half = rx * math.sqrt(max(0.0, 1 - ((y - cy) / ry) ** 2))
@@ -592,7 +676,7 @@ def _portrait_into(ink: Ink, rng, a: dict, expr: str | None = None, zoom: float 
     fx = pick(rng, (None, None, None, *EFFECTS))
     if fx:
         EFFECTS[fx](ink, rng)
-        tags.append(fx)
+        tags.append("color background" if ink.is_color and fx == "screentone background" else fx)
     m = min(W, H)
     sc = m * (zoom or rng.uniform(0.17, 0.25))
     cx = W / 2 + rng.uniform(-0.06, 0.06) * W
@@ -601,50 +685,54 @@ def _portrait_into(ink: Ink, rng, a: dict, expr: str | None = None, zoom: float 
     return tags
 
 
-def make_portrait(rng, size: int):
-    a = sample_character(rng)
-    ink = Ink(size, size)
+def _head(head: str, color: bool) -> str:
+    return f"color {head}" if color else head
+
+
+def make_portrait(rng, size: int, color: bool = False):
+    a = sample_character(rng, color)
+    ink = new_ink(size, size, color)
     close = rng.random() < 0.2
     extra = _portrait_into(ink, rng, a, zoom=rng.uniform(0.3, 0.38) if close else None)
     head = pick(rng, ("manga portrait", "manga portrait", "anime portrait", "manga character")) if not close else "manga close-up"
-    return ink.finish(), ", ".join([head] + character_tags(a, not close) + extra), "portrait"
+    return ink.finish(), ", ".join([_head(head, color)] + character_tags(a, not close) + extra), "portrait"
 
 
-def make_chibi(rng, size: int):
-    a = sample_character(rng)
-    ink = Ink(size, size)
+def make_chibi(rng, size: int, color: bool = False):
+    a = sample_character(rng, color)
+    ink = new_ink(size, size, color)
     extra = []
     fx = pick(rng, (None, None, "sparkles", "flowers", "screentone background"))
     if fx:
         EFFECTS[fx](ink, rng)
-        extra.append(fx)
+        extra.append("color background" if color and fx == "screentone background" else fx)
     pose = draw_chibi(ink, rng, a, size * rng.uniform(0.42, 0.58), size * rng.uniform(0.32, 0.38), size * rng.uniform(0.15, 0.19))
     tags = [t for t in character_tags(a, False) if not t.endswith("bangs")]
-    return ink.finish(), ", ".join(["chibi character, full body", pose] + tags + extra), "chibi"
+    return ink.finish(), ", ".join([_head("chibi character, full body", color), pose] + tags + extra), "chibi"
 
 
-def make_scene(rng, size: int):
+def make_scene(rng, size: int, color: bool = False):
     name = pick(rng, tuple(SCENES))
-    ink = Ink(size, size)
+    ink = new_ink(size, size, color)
     tags = SCENES[name](ink, rng)
     head = pick(rng, ("manga background", "manga background", "anime scenery", "detailed environment"))
-    return ink.finish(), ", ".join([head] + tags), "scene"
+    return ink.finish(), ", ".join([_head(head, color)] + tags), "scene"
 
 
-def make_object(rng, size: int):
+def make_object(rng, size: int, color: bool = False):
     name = pick(rng, tuple(OBJECTS))
-    ink = Ink(size, size)
+    ink = new_ink(size, size, color)
     if rng.random() < 0.25:
         fx_tone(ink, rng)
     tags = OBJECTS[name](ink, rng)
-    return ink.finish(), ", ".join(["manga illustration"] + tags), "object"
+    return ink.finish(), ", ".join([_head("manga illustration", color)] + tags), "object"
 
 
-def make_composition(rng, size: int):
+def make_composition(rng, size: int, color: bool = False):
     """A character in front of an environment, optionally with a speech bubble."""
-    a = sample_character(rng)
+    a = sample_character(rng, color)
     name = pick(rng, tuple(SCENES))
-    ink = Ink(size, size)
+    ink = new_ink(size, size, color)
     tags = SCENES[name](ink, rng)
     sc = size * rng.uniform(0.13, 0.19)
     cx = size * pick(rng, (0.3, 0.5, 0.7)) + rng.uniform(-0.04, 0.04) * size
@@ -655,17 +743,18 @@ def make_composition(rng, size: int):
         bx = size * (0.78 if cx < size * 0.5 else 0.22)
         bubble(ink, rng, bx, size * 0.2, size * 0.16, size * 0.1, tail_to=(cx + (bx - cx) * 0.35, cy - sc * 0.9))
         extra.append("speech bubble")
-    return ink.finish(), ", ".join(["manga illustration", short_description(a), a["expr"], a["outfit"]] + tags[:2] + extra), "composition"
+    outfit = next(t for t in character_tags(a) if t.endswith(a["outfit"]))
+    return ink.finish(), ", ".join([_head("manga illustration", color), short_description(a), a["expr"], outfit] + tags[:2] + extra), "composition"
 
 
 LAYOUTS = ([1, 1], [1, 2], [2, 1], [2, 2], [1, 2, 1], [2, 1, 2], [1, 3], [3, 1], [2, 3], [1, 1, 2])
 
 
-def make_page(rng, size: int):
+def make_page(rng, size: int, color: bool = False):
     """A comic page: rows of framed panels around one recurring character."""
-    a = sample_character(rng)
+    a = sample_character(rng, color)
     layout = pick(rng, LAYOUTS)
-    page = np.zeros((size, size), dtype=bool)
+    page = np.full((size, size), WHITE, dtype=np.uint8) if color else np.zeros((size, size), dtype=bool)
     margin, gut = int(size * 0.025), int(size * 0.02)
     cuts = np.sort(rng.uniform(0.3, 0.7, len(layout) - 1)) if len(layout) == 2 else np.cumsum(rng.dirichlet([6] * len(layout)))[:-1]
     ys = [margin] + [int(margin + (size - 2 * margin) * c) for c in cuts] + [size - margin]
@@ -678,7 +767,7 @@ def make_page(rng, size: int):
             w, h = x1 - x0, y1 - y0
             if w < 24 or h < 24:
                 continue
-            ink = Ink(w, h)
+            ink = new_ink(w, h, color)
             n_panels += 1
             kind = pick(rng, ("char", "char", "char", "scene", "effect"))
             if kind == "char":
@@ -698,7 +787,7 @@ def make_page(rng, size: int):
                 sfx(ink, rng, w * 0.12, h * 0.3, min(w / 4.5, h * 0.4))
                 has_sfx = True
             page[y0:y1, x0:x1] = frame(ink.finish(), 3)
-    tags = ["manga page", f"{n_panels} panels", short_description(a)] + subjects[:2]
+    tags = [_head("manga page", color), f"{n_panels} panels", short_description(a)] + subjects[:2]
     if has_bubble:
         tags.append("speech bubbles")
     if has_sfx:
@@ -710,9 +799,13 @@ MAKERS = {"portrait": (make_portrait, 0.34), "chibi": (make_chibi, 0.08), "scene
           "page": (make_page, 0.2), "object": (make_object, 0.06), "composition": (make_composition, 0.08)}
 
 
-def sample(rng, size: int = 512) -> tuple[np.ndarray, str, str]:
-    """-> (ink bitmap bool [size, size], caption, kind)."""
+def sample(rng, size: int = 512, color: bool = False) -> tuple[np.ndarray, str, str]:
+    """-> (picture, caption, kind).
+
+    The picture is a bool ink map [size, size] for black-and-white, or a uint8
+    array of palette indices when color=True.
+    """
     names = list(MAKERS)
     w = np.array([MAKERS[n][1] for n in names])
     name = names[int(rng.choice(len(names), p=w / w.sum()))]
-    return MAKERS[name][0](rng, size)
+    return MAKERS[name][0](rng, size, color)

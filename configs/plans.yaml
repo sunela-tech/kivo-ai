@@ -1,0 +1,39 @@
+# Plans: three usage tiers for the INKOS app.
+#
+# A plan decides which models may generate, the largest image size, how many
+# images can be made per day and how many projects can exist. Training is
+# never restricted. INKOS has no accounts and takes no payments: the active
+# plan is a setting stored on this machine (settings.json) and is changed on
+# the Plans page or with  python -m inkos plan --set <id>.
+#
+# Edit this file to rename plans or change what they include. `price` is
+# only a label shown on the Plans page; leave it null to show nothing.
+default: basic
+
+plans:
+  - id: basic
+    name: Basic
+    tagline: Black-and-white notes, lists and simple graphics.
+    price: null
+    models: [inkos1]
+    max_size: 512
+    images_per_day: 30
+    projects: 1
+
+  - id: plus
+    name: Plus
+    tagline: Adds colour with INKOS 1.1 and the 1024 px size.
+    price: null
+    models: [inkos1, inkos1_1]
+    max_size: 1024
+    images_per_day: 300
+    projects: 10
+
+  - id: studio
+    name: Studio
+    tagline: Every model, including both Pro models, without limits.
+    price: null
+    models: [inkos1, inkos1_1, inkos1_pro, inkos1_1_pro]
+    max_size: 1024
+    images_per_day: null      # null = unlimited
+    projects: null

@@ -29,6 +29,46 @@ def test_generator_writes_valid_programs(name):
     assert bitmap.is_pure_bw(render(ops, d.prompt, 256))
 
 
+def test_colour_schemes_keep_text_spans_valid():
+    from inkos import palette
+    from inkos.data import colorize
+    rng = np.random.default_rng(3)
+    seen = set()
+    for i in range(400):
+        d = list(FAMILIES.values())[i % len(FAMILIES)][0](rng)
+        if d is None:
+            continue
+        plain_prompt = d.prompt
+        texts = [lang.resolve_text(op[5], d.prompt) for op in d.ops if op[0] == "TEXT"]
+        colorize.colorize(d, rng, 256)
+        assert d.prompt.endswith(plain_prompt)                              # only a prefix is added
+        prefix = d.prompt[: len(d.prompt) - len(plain_prompt)]
+        seen.add("plain" if not prefix else "two" if " and " in prefix else "colourful" if prefix.startswith(("col", "multi")) else "one")
+        ops, ok = lang.decode(lang.encode(d.ops, lang.VOCAB_COLOR) + [lang.EOS], len(d.prompt), lang.VOCAB_COLOR)
+        assert ok
+        assert [lang.resolve_text(op[5], d.prompt) for op in ops if op[0] == "TEXT"] == texts   # same words on the page
+        used = {op[1] for op in ops if op[0] == "COLOR"}
+        if prefix and prefix.split()[0] in palette.INDEX and " and " not in prefix:
+            assert used == {palette.INDEX[prefix.split()[0]]}               # "blue ..." draws in blue only
+        assert palette.is_pure(render(ops, d.prompt, 256, color=True))
+    assert seen == {"plain", "one", "two", "colourful"}
+
+
+def test_colourful_bar_chart_fills_each_bar():
+    from inkos import palette
+    from inkos.data import colorize
+    from inkos.data.doc import Doc
+    d = Doc("bar")
+    d.say("bar chart: ")
+    d.ops = [("LINE", [(17, 9), (17, 113), (122, 113)]), ("RECT", 20, 60, 40, 113), ("RECT", 50, 30, 70, 113), ("TEXT", 22, 116, 4, 127, ["A"])]
+    out = colorize._colourful(d, d.ops)
+    assert out == [("LINE", [(17, 9), (17, 113), (122, 113)]),
+                   ("COLOR", palette.RED), ("BOX", 20, 60, 40, 113), ("COLOR", palette.BLACK), ("RECT", 20, 60, 40, 113),
+                   ("COLOR", palette.YELLOW), ("BOX", 50, 30, 70, 113), ("COLOR", palette.BLACK), ("RECT", 50, 30, 70, 113),
+                   ("TEXT", 22, 116, 4, 127, ["A"])]
+    assert colorize._colourful(d, [("LINE", [(1, 1), (9, 9)])]) is None      # nothing to fill
+
+
 def test_bar_heights_follow_the_numbers():
     rng = np.random.default_rng(1)
     checked = 0
@@ -127,6 +167,32 @@ def test_raster_store_epoch_and_resume(tmp_path):
     for skip in (1, 3, 5):                                            # resuming mid-epoch replays the same batches
         rest = list(ds.batches(2, 10, seed=5, skip=skip))
         assert [b["caption"] for b in rest] == [b["caption"] for b in full[skip:]]
+
+
+@pytest.mark.parametrize("kind", sorted(manga_scenes.MAKERS))
+def test_colour_manga_generator(kind):
+    from inkos import palette
+    rng = np.random.default_rng(5)
+    for _ in range(3):
+        idx, caption, k = manga_scenes.MAKERS[kind][0](rng, 256, True)
+        assert idx.shape == (256, 256) and idx.dtype == np.uint8 and idx.max() < palette.N and k == kind
+        assert caption.startswith("color ") and len(caption) < 192
+        assert 0.003 < (idx != palette.WHITE).mean() < 0.999
+
+
+def test_colour_raster_store(tmp_path):
+    import json
+
+    from inkos import palette
+    rng = np.random.default_rng(0)
+    imgs = [rng.integers(0, palette.N, (32, 32)).astype(np.uint8) for _ in range(10)]
+    store.write_raster_shard(tmp_path / "train-synth-00000.npz", imgs, [f"c{i}" for i in range(10)], [0] * 10)
+    (tmp_path / "meta.json").write_text(json.dumps({"kinds": ["a"], "resolution": 32, "palette": "eink6",
+                                                    "shards": {"train": {"train-synth-00000.npz": 10}, "val": {}}}))
+    ds = store.RasterSet(tmp_path, "train", pool=1)
+    batch = next(ds.batches(0, 4, 0, shuffle=False))
+    assert ds.color and batch["image"].dtype.is_floating_point is False and batch["image"].shape == (4, 32, 32)
+    assert (batch["image"].numpy() == np.stack(imgs[:4])).all()
 
 
 @pytest.mark.parametrize("kind", sorted(manga_scenes.MAKERS))

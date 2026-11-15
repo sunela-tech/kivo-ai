@@ -1,0 +1,81 @@
+# INKOS 1.1 - INKOS 1 with colour: the same vector-program model, drawing in
+# the six-colour E-Ink palette (black, white, red, yellow, blue, green).
+id: inkos1_1
+name: INKOS 1.1
+architecture: inkscript-transformer
+summary: >-
+  INKOS 1 with colour. Writes the same kind of drawing program, plus pen
+  colours, and renders it in the six-colour E-Ink palette at any size.
+  Small, fast, runs on a CPU.
+specialties: [colour notes and lists, colour charts, colour diagrams, coloured icons and symbols, sketches]
+palette: eink6
+
+# Training target for this model. A goal, not a claim: the trainer records
+# the number of epochs actually completed.
+target_epochs: 10000
+
+model:
+  d_model: 256
+  n_layers: 8
+  n_heads: 8
+  d_ff: 1024
+  max_prompt: 256
+  max_program: 320
+  dropout: 0.0
+  color: true            # six colour tokens after the INKOS 1 vocabulary
+
+data:
+  count: 330000
+  val_count: 4000
+  shard_size: 20000
+  seed: 3
+  mix:
+    notes: 0.24
+    charts: 0.14
+    diagrams: 0.14
+    symbols: 0.12
+    icons: 0.14
+    sketches: 0.22
+
+train:
+  # Start from INKOS 1's installed weights when they are present, so the
+  # layouts it already knows carry over. This model's own epoch count still
+  # starts at zero. Remove the line (or use --fresh) to start from random weights.
+  init_from: inkos1
+  batch_size: 32
+  lr: 4.0e-4
+  min_lr: 4.0e-5
+  warmup_steps: 300
+  schedule_epochs: null
+  weight_decay: 0.02
+  betas: [0.9, 0.98]
+  grad_clip: 1.0
+  ema_decay: 0.999
+  log_every: 20
+  val_every_steps: 750
+  val_batches: 40
+  checkpoint_minutes: 10
+  keep_checkpoints: 3
+  seed: 3
+
+sample:
+  temperature: 0.7
+  top_p: 0.95
+
+inference:
+  sizes: [256, 512, 1024]
+  default_size: 512
+
+preview_prompts:
+  - "blue note Groceries: milk; eggs; bread; coffee"
+  - "black and red todo: [x] Pay rent; Call Anna; Buy stamps"
+  - "green handwritten journal 2026-11-15: Woke up early and went for a walk before breakfast."
+  - "colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9"
+  - "colorful pie chart: Rent 50, Food 30, Fun 20"
+  - "colorful flowchart: Start -> Check -> Done"
+  - "colorful stack: UI; API; DB"
+  - "black and blue mind map: Project; Design; Build; Test"
+  - "red heart"
+  - "yellow sun"
+  - "colorful three stars"
+  - "green sketch of a tree"

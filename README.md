@@ -1,21 +1,26 @@
 # INKOS
 
-Two local image models that draw **pure black-and-white PNGs** for E-Ink
-screens. Both are trained from scratch with PyTorch, run fully offline, and
-are driven from the command line or a black-and-white HTML interface.
+Four local image models for E-Ink screens: two draw **pure black and white**,
+two draw in the **six-colour E-Ink palette**. All are trained from scratch
+with PyTorch, run fully offline, and are driven from the command line or a
+black-and-white HTML interface with three usage plans.
 
-| | INKOS 1 | INKOS 1 Pro |
-| --- | --- | --- |
-| Made for | notes, journals, logs, to-do lists, tables, icons, symbols, sketches, diagrams, charts | manga characters, comic panels and pages, line art, environments |
-| How it draws | a transformer writes a short vector drawing program; a rasteriser renders it | a diffusion U-Net denoises a 1-bit bitmap; a learned refiner upscales it |
-| Parameters | 6.66 million | 57.55 million |
-| Output sizes | 256, 512, 1024 (resolution independent) | 256 native, 512 and 1024 through the refiner |
-| Training target | 10,000 epochs | 20,000 epochs |
-| Trains on | a CPU or any GPU | a GPU (8 GB or more) |
-| Config | `configs/inkos1.yaml` | `configs/inkos1_pro.yaml` |
+| | INKOS 1 | INKOS 1 Pro | INKOS 1.1 | INKOS 1.1 Pro |
+| --- | --- | --- | --- | --- |
+| Output | black and white, 1 bit | black and white, 1 bit | six colours | six colours |
+| Made for | notes, journals, logs, lists, tables, icons, sketches, diagrams, charts | manga characters, comic panels and pages, line art, environments | the INKOS 1 subjects in colour | the INKOS 1 Pro subjects in flat colour |
+| How it draws | a transformer writes a vector drawing program; a rasteriser renders it | a diffusion U-Net denoises a bitmap; a learned refiner upscales it | as INKOS 1, plus pen-colour tokens | as INKOS 1 Pro, one channel per colour |
+| Parameters | 6.66 million | 57.55 million | 6.66 million | 57.90 million |
+| Sizes | 256, 512, 1024 | 256 native, 512 and 1024 refined | 256, 512, 1024 | 256 native, 512 and 1024 refined |
+| Training target | 10,000 epochs | 20,000 epochs | 10,000 epochs | 20,000 epochs |
+| Trains on | a CPU or any GPU | a GPU (8 GB or more) | a CPU or any GPU | a GPU (8 GB or more) |
+| Config | `configs/inkos1.yaml` | `configs/inkos1_pro.yaml` | `configs/inkos1_1.yaml` | `configs/inkos1_1_pro.yaml` |
 
-Every output pixel is exactly `#000000` or `#FFFFFF`. Files are written as
-1-bit PNGs.
+Black-and-white models write 1-bit PNGs in which every pixel is exactly
+`#000000` or `#FFFFFF`. Colour models write indexed PNGs whose palette holds
+exactly six entries: black `#000000`, white `#FFFFFF`, red `#FF0000`, yellow
+`#FFFF00`, blue `#0000FF` and green `#00FF00`, the pigments of current colour
+E-Ink panels. No output ever contains a grey, a tint or an anti-aliased edge.
 
 ## What is trained and what is not
 
@@ -56,21 +61,50 @@ pip install -r requirements.txt        # torch, numpy, pillow, pyyaml
 ```
 
 ```bash
-python -m inkos doctor                 # hardware check for both models
+python -m inkos doctor                 # hardware check for all four models
 ```
 
 ```bash
 python -m inkos serve                  # http://localhost:8765
 ```
 
-INKOS 1 ships with a small trained weight file in `models/inkos1/`, so the
-interface can generate straight away. INKOS 1 Pro has to be trained first.
+INKOS 1 and INKOS 1.1 ship with small trained weight files in `models/`, so
+the interface can generate straight away. The two Pro models have to be
+trained first. A new installation starts on the Basic plan, which includes
+INKOS 1 only; see [Plans](#plans) to switch.
 
 Generate from the command line:
 
 ```bash
 python -m inkos generate --model inkos1 --prompt "bar chart: 3, 7, 5, 9" --size 512 --out chart.png
 ```
+
+```bash
+python -m inkos plan --set plus
+```
+
+```bash
+python -m inkos generate --model inkos1_1 --prompt "colorful flowchart: Start -> Check -> Done" --out flow.png
+```
+
+## Plans
+
+Three plans decide what the app will generate. They are defined in
+`configs/plans.yaml` and can be renamed or changed there.
+
+| Plan | Models | Largest size | Images per day | Projects |
+| --- | --- | --- | --- | --- |
+| Basic (default) | INKOS 1 | 512 px | 30 | 1 |
+| Plus | INKOS 1, INKOS 1.1 | 1024 px | 300 | 10 |
+| Studio | all four | 1024 px | unlimited | unlimited |
+
+A plan is a setting stored on this machine (`settings.json`); the daily count
+lives in `usage.json`. There are no accounts, license keys or payments:
+switching is one tap on the Plans tab or `python -m inkos plan --set studio`.
+Each plan has an optional `price` label in the config, empty by default,
+which is only displayed. The local server and `python -m inkos generate`
+both enforce the active plan. Training, evaluation and export are never
+limited.
 
 ## Training
 
@@ -93,15 +127,20 @@ python -m inkos data prepare --model inkos1
 python -m inkos data prepare --model inkos1_pro
 ```
 
+Use `inkos1_1` or `inkos1_1_pro` for the colour models.
+
 INKOS 1 gets 330,000 drawings: procedural notes, charts, diagrams and symbols,
 about 9,300 open-licensed stroke icons (MIT / ISC) and about 110,000
 Quick, Draw! sketches (CC BY 4.0). The icon sets and sketches are downloaded
-once; add `--offline` to use procedural data only. INKOS 1 Pro gets 60,000
-procedurally drawn manga images at 512 px. Use `--count` for more or less.
-Sources and licenses are listed in [DATA_LICENSES.md](DATA_LICENSES.md).
+once; add `--offline` to use procedural data only. INKOS 1.1 gets the same
+material with colour schemes applied. INKOS 1 Pro gets 60,000 procedurally
+drawn manga images at 512 px with screentone; INKOS 1.1 Pro gets 60,000 drawn
+in flat palette colours. Use `--count` for more or less. Sources and licenses
+are listed in [DATA_LICENSES.md](DATA_LICENSES.md).
 
-Add your own licensed artwork to INKOS 1 Pro (captions come from `.txt` files
-next to the images):
+Add your own licensed artwork to INKOS 1 Pro or INKOS 1.1 Pro (captions come
+from `.txt` files next to the images; for the colour model every pixel is
+snapped to the nearest palette colour):
 
 ```bash
 python -m inkos data import --model inkos1_pro --dir ~/my_art --license "own work"
@@ -133,6 +172,10 @@ python -m inkos train --model inkos1_pro
   situation right after cloning this repository), training **continues from
   those weights** and from their recorded epoch count. An export carries no
   optimiser state, so the optimiser starts cold with a fresh warm-up.
+* INKOS 1.1 declares `train.init_from: inkos1`: when it has no checkpoint and
+  no installed weights of its own, it starts from INKOS 1's installed weights
+  (its six colour tokens start random) and its own epoch count starts at zero.
+  Its status and manifest record where it started from.
 * `--max-hours 8`, `--max-steps N` and `--until-epoch N` stop cleanly at a
   budget. `--fresh` discards the run and starts from random weights.
   `--device cuda:1` picks a device; on CUDA mixed precision is used
@@ -169,8 +212,8 @@ on the 4-core CPU this project was built on:
 | INKOS 1 Pro | 4.25 samples/s (batch 16) | 3.9 hours for 60,000 samples | 20,000 epochs: 9.0 years |
 <!-- BENCH:END -->
 
-The targets are large: 10,000 epochs of INKOS 1 are 3.3 billion training
-samples and 20,000 epochs of INKOS 1 Pro are 1.2 billion. They are out of
+The targets are large: 10,000 epochs of INKOS 1 or INKOS 1.1 are 3.3 billion
+training samples, and 20,000 epochs of either Pro model are 1.2 billion. They are out of
 reach on a CPU; run the benchmark on your GPU for a real estimate. Lower
 `target_epochs` or `data.count` in the config if you want a run that finishes
 sooner; the cosine learning-rate schedule follows whatever target you set.
@@ -200,6 +243,11 @@ noise, on how well the refiner restores reduced real images, and on how the
 statistics of generated images (ink coverage, edge density, speckle) compare
 with real ones.
 
+The colour models use the same tools. INKOS 1.1 adds two colour scores: how
+often a generated drawing uses exactly the colours of its reference, and the
+share of inked pixels that have the reference colour. INKOS 1.1 Pro adds the
+refiner's pixel accuracy and the colour mix of generated against real images.
+
 ## The interface
 
 `python -m inkos serve` starts a local server (standard library only) and the
@@ -219,10 +267,14 @@ HTML interface in `web/`:
 * **Training**: epochs completed against the target, samples seen, losses,
   measured speed and time to target, loss curve, latest validation samples,
   the trainer log, and Start / Resume / Stop.
+* **Plans**: the three plans, what each includes, today's image count, and a
+  button to switch. Models outside the active plan are shown struck through
+  in the model selector and lead here.
 
-The page uses two colours, no gradients, no shadows and no animation, has
-48 px touch targets, and only redraws what changed. It loads nothing from
-the network. By default the server listens on `127.0.0.1`; to use it from an
+The page itself uses two colours, no gradients, no shadows and no animation,
+has 48 px touch targets, and only redraws what changed. The only other
+colours on screen are the generated pictures and the palette swatches of the
+colour models. It loads nothing from the network. By default the server listens on `127.0.0.1`; to use it from an
 E-Ink tablet on the same network:
 
 ```bash
@@ -307,16 +359,46 @@ simple original artwork, good for learning line, tone and layout. It is not
 professional manga, and a model trained only on it will not draw like one;
 for that, import artwork you made or are licensed to use.
 
+### INKOS 1.1 and INKOS 1.1 Pro: the same models in six colours
+
+**INKOS 1.1** is the INKOS 1 network with six more tokens that set the pen
+colour. The tokens are placed after the INKOS 1 vocabulary, so INKOS 1's
+weights load into INKOS 1.1 unchanged and it starts with everything INKOS 1
+already knows. Colour is asked for at the start of the prompt:
+
+```
+blue note Groceries: milk; eggs            everything in one colour
+black and red todo: [x] Pay rent; ...      text in the first colour, marks in the second
+colorful bar chart: Mon 3, Tue 7, Wed 5    shapes filled red, yellow, blue, green in turn
+red heart      yellow sun      green sketch of a tree
+```
+
+In the colourful scheme outlines stay black and lettering on a dark fill is
+written in white. The rasteriser works on palette indices and reduces its
+supersampled canvas by majority vote, so colours are never mixed.
+
+**INKOS 1.1 Pro** is the INKOS 1 Pro diffusion model with one channel per
+palette colour instead of one ink bit. A pixel is diffused as a one-hot
+vector, the network predicts a distribution over the six colours for every
+pixel (cross-entropy loss), and the final picture is the most likely colour
+of each pixel. Its training set is the procedural manga generator drawing in
+flat colour: coloured hair, eyes and clothes, blue skies and seas, red shrine
+gates, yellow moons, with captions that name the colours. Prompts start with
+`color`, for example `color manga portrait, girl, long red hair, green eyes,
+smiling, blue sailor uniform`.
+
 ## Project layout
 
 ```
-configs/            the two model configurations
+configs/            the four model configurations and plans.yaml
 inkos/
   cli.py            command line
   config.py         config loading, model fingerprint
+  palette.py        the six-colour E-Ink palette
+  plans.py          the three plans and their enforcement
   vector/           InkScript language, stroke font, rasteriser
-  models/           inkos1.py, inkos1_pro.py
-  data/             generators, icon and sketch importers, dataset stores
+  models/           inkos1.py (INKOS 1, 1.1), inkos1_pro.py (INKOS 1 Pro, 1.1 Pro)
+  data/             generators, colour schemes, icon and sketch importers, dataset stores
   training/         trainer (checkpoints, resume, status) and per-model tasks
   evaluate.py       evaluation tools
   export.py         checkpoint -> installed weights
@@ -326,6 +408,7 @@ inkos/
 web/                interface (index.html, style.css, app.js)
 tests/              test suite (pytest)
 models/inkos1/      installed INKOS 1 weights and their manifest
+models/inkos1_1/    installed INKOS 1.1 weights and their manifest
 ```
 
 Run the tests with:
@@ -334,6 +417,6 @@ Run the tests with:
 python -m pytest
 ```
 
-They build tiny versions of both models and run the full path: prepare,
+They build tiny versions of all four models and run the full path: prepare,
 train, stop, resume, export, generate at every size, evaluate, and the
 server API.

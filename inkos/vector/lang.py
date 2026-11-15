@@ -21,6 +21,7 @@ Program (python form)            Tokens
   ("BOX",  x0, y0, x1, y1)       BOX ...                 filled rectangle
   ("ELLI", cx, cy, rx, ry)       ELLI ...                ellipse outline
   ("TEXT", x, y, size, wrap, items)   TEXT x y s w item.. END
+  ("COLOR", k)                   C_BLACK .. C_GREEN      pen colour (INKOS 1.1 only)
 
 A TEXT item is either a literal string (the model spells it character by
 character) or a span (i, j): "copy characters i..j of the prompt". Spans are
@@ -45,6 +46,13 @@ TOK = {n: i for i, n in enumerate(NAMES)}
 COORD0 = len(NAMES)
 CHAR0 = COORD0 + GRID
 VOCAB = CHAR0 + N_CHARS
+
+# INKOS 1.1 adds six colour tokens. They sit after the INKOS 1 vocabulary so
+# that no existing id moves and INKOS 1 weights stay valid.
+N_COLORS = 6
+COLOR0 = VOCAB
+VOCAB_COLOR = VOCAB + N_COLORS
+COLOR_NAMES = ("black", "white", "red", "yellow", "blue", "green")
 
 END = TOK["END"]
 TEXT = TOK["TEXT"]
@@ -85,16 +93,28 @@ def token_name(t: int) -> str:
     return f"@{t - VOCAB}"
 
 
+def color_token_name(t: int) -> str:
+    return f"C_{COLOR_NAMES[t - COLOR0].upper()}"
+
+
 # --------------------------------------------------------------------------
 # encode
 # --------------------------------------------------------------------------
 
-def encode(ops: list[tuple]) -> list[int]:
-    """Program -> token ids (no BOS/EOS). Pointer tokens are VOCAB + index."""
+def encode(ops: list[tuple], vocab: int = VOCAB) -> list[int]:
+    """Program -> token ids (no BOS/EOS). Pointer tokens are vocab + index.
+
+    vocab is VOCAB for INKOS 1 and VOCAB_COLOR for INKOS 1.1, whose programs
+    may also contain ("COLOR", k) to change the pen colour.
+    """
     out: list[int] = []
     for op in ops:
         name = op[0]
-        if name == "W":
+        if name == "COLOR":
+            if vocab < VOCAB_COLOR:
+                raise ValueError("colour is not part of the black-and-white dialect")
+            out.append(COLOR0 + int(op[1]))
+        elif name == "W":
             out.append(TOK[f"W{int(op[1])}"])
         elif name in STATE_CMDS:
             out.append(TOK[name])
@@ -124,8 +144,8 @@ def encode(ops: list[tuple]) -> list[int]:
                     i, j = it
                     if j < i:
                         raise ValueError("span end before start")
-                    out.append(VOCAB + int(i))
-                    out.append(VOCAB + int(j))
+                    out.append(vocab + int(i))
+                    out.append(vocab + int(j))
             out.append(END)
         else:
             raise ValueError(f"unknown op {name!r}")
@@ -160,8 +180,9 @@ class Grammar:
     that every generated program is renderable.
     """
 
-    def __init__(self, prompt_len: int = 0):
+    def __init__(self, prompt_len: int = 0, vocab: int = VOCAB):
         self.P = int(prompt_len)
+        self.V = int(vocab)
         self.ops: list[tuple] = []
         self.mode = "top"
         self.cmd = ""
@@ -197,18 +218,25 @@ class Grammar:
                 ptr[:] = True
         elif self.mode == "span_end":
             ptr[self.span_start:] = True
+        if self.V > VOCAB:                        # colour tokens are legal between commands
+            extra = np.zeros(self.V - VOCAB, dtype=bool)
+            extra[:] = self.mode == "top"
+            return np.concatenate([m, extra, ptr])
         return np.concatenate([m, ptr])
 
     # -- consume one token ----------------------------------------------
     def feed(self, t: int) -> bool:
         """Advance by one token. Returns False (and changes nothing) if illegal."""
         t = int(t)
-        if self.done or t < 0 or t >= VOCAB + self.P or not self.allowed()[t]:
+        if self.done or t < 0 or t >= self.V + self.P or not self.allowed()[t]:
             return False
         if self.mode == "top":
             if t == EOS:
                 self.done = True
                 self.mode = "done"
+                return True
+            if t >= COLOR0:
+                self.ops.append(("COLOR", t - COLOR0))
                 return True
             name = _ID_TO_NAME[t]
             if name in STATE_CMDS:
@@ -239,8 +267,8 @@ class Grammar:
             if t == END:
                 self.ops.append(("TEXT", *self.args, self.items))
                 self.mode = "top"
-            elif t >= VOCAB:
-                self.span_start = t - VOCAB
+            elif t >= self.V:
+                self.span_start = t - self.V
                 self.mode = "span_end"
                 self.n_items += 1
             else:
@@ -251,7 +279,7 @@ class Grammar:
                     self.items.append(c)
                 self.n_items += 1
         elif self.mode == "span_end":
-            self.items.append((self.span_start, t - VOCAB))
+            self.items.append((self.span_start, t - self.V))
             self.mode = "items"
         return True
 
@@ -260,14 +288,14 @@ class Grammar:
         return self.mode not in ("top", "done")
 
 
-def decode(tokens, prompt_len: int = 0) -> tuple[list[tuple], bool]:
+def decode(tokens, prompt_len: int = 0, vocab: int = VOCAB) -> tuple[list[tuple], bool]:
     """Token ids -> (program, ok).
 
     Parsing stops at EOS, PAD or the first illegal token. ok is True only when
     the sequence was a complete, well-formed program terminated by EOS.
     Whatever was complete before a failure is still returned.
     """
-    g = Grammar(prompt_len)
+    g = Grammar(prompt_len, vocab)
     for t in tokens:
         t = int(t)
         if t == PAD or not g.feed(t):

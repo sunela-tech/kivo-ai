@@ -8,6 +8,7 @@
   python -m inkos export --model inkos1          install weights for inference
   python -m inkos generate --model inkos1 --prompt "house icon" --out house.png
   python -m inkos serve                          local server + HTML interface
+  python -m inkos plan                           the three plans and the active one
 
 Training and inference are separate: `train` writes checkpoints under runs/,
 `export` copies the averaged weights to models/, and `generate` / `serve` only
@@ -71,7 +72,10 @@ def cmd_train(a):
         shutil.rmtree(run)
     trainer = Trainer(cfg, get_task(cfg), device=a.device, threads=a.threads)
     if not trainer.resume() and not a.fresh:
-        trainer.warm_start()         # e.g. a fresh clone that ships installed weights
+        # a fresh clone that ships installed weights continues from them; otherwise a
+        # model may declare a starting point (INKOS 1.1 starts from INKOS 1)
+        if not trainer.warm_start() and cfg.train.get("init_from"):
+            trainer.init_from(cfg.train.init_from)
     status = trainer.fit(max_hours=a.max_hours, max_steps=a.max_steps, until_epoch=a.until_epoch)
     sys.exit(0 if status in ("completed", "paused", "interrupted") else 1)
 
@@ -124,8 +128,38 @@ def cmd_export(a):
     print(json.dumps(manifest, indent=2))
 
 
+def cmd_plan(a):
+    from . import plans
+    if a.set:
+        try:
+            plans.set_plan(a.set)
+        except plans.PlanError as e:
+            sys.exit(str(e))
+    s = plans.summary()
+    names = {mid: load_config(mid).name for mid in model_ids()}
+    for p in s["plans"]:
+        mark = "  <- active" if p["id"] == s["current"] else ""
+        print(f"\n{p['name']}  ({p['id']}){mark}")
+        if p["tagline"]:
+            print(f"  {p['tagline']}")
+        if p["price"]:
+            print(f"  price            {p['price']}")
+        print(f"  models           {', '.join(names.get(m, m) for m in p['models'])}")
+        print(f"  largest size     {p['max_size'] or 'any'} px")
+        print(f"  images per day   {p['images_per_day'] if p['images_per_day'] is not None else 'unlimited'}")
+        print(f"  projects         {p['projects'] if p['projects'] is not None else 'unlimited'}")
+    u = s["usage"]
+    print(f"\nused today: {u['images']}" + (f" of {u['limit']}" if u["limit"] is not None else " (no daily limit)"))
+    print("Plans are a local setting. Change with:  python -m inkos plan --set <id>")
+
+
 def cmd_generate(a):
+    from . import plans
     from .engine import Engine
+    try:
+        plans.check_generate(a.model, load_config(a.model).name, a.size)
+    except plans.PlanError as e:
+        sys.exit(f"{e}  (python -m inkos plan --set <id>)")
     eng = Engine()
     t0 = time.time()
     try:
@@ -136,6 +170,7 @@ def cmd_generate(a):
     print(file=sys.stderr)
     from . import bitmap
     out = bitmap.save_png(res["image"], a.out)
+    plans.record_image()
     print(f"wrote {out}  ({a.size}x{a.size}, seed {res['meta']['seed']}, {time.time() - t0:.1f} s, "
           f"weights: {res['meta']['weights']['source']}, {_epochs(res['meta']['weights']['epochs_completed'])} trained)")
 
@@ -223,6 +258,10 @@ def main(argv=None):
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8765)
     v.set_defaults(fn=cmd_serve)
+
+    pl = sub.add_parser("plan", help="show the three plans, or switch the active one")
+    pl.add_argument("--set", metavar="ID", help="make this plan active (basic, plus, studio)")
+    pl.set_defaults(fn=cmd_plan)
 
     h = sub.add_parser("doctor", help="check hardware and installation")
     h.add_argument("--bench", action="store_true", help="measure real training and inference speed")

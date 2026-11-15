@@ -3,8 +3,9 @@
   python -m inkos data import --model inkos1_pro --dir ~/my_manga \
       --license "own work" --source "my sketchbook scans"
 
-Each image is fitted onto a white square, reduced to pure black/white and
-stored next to the procedural data. A caption is read from a .txt file with
+Each image is fitted onto a white square, reduced to pure black/white (or,
+for INKOS 1.1 Pro, to the six palette colours) and stored next to the
+procedural data. A caption is read from a .txt file with
 the same name; otherwise --caption or the folder and file name are used.
 
 A license statement is mandatory and is recorded in the dataset metadata.
@@ -16,15 +17,27 @@ import re
 import time
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
-from .. import bitmap, paths
+from .. import bitmap, palette, paths
 from ..config import Config
 from ..prompts import normalize_prompt
 from . import manga_scenes, store
 from .prepare_raster import read_meta, write_meta
 
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
+
+def quantize(img: Image.Image, size: int) -> np.ndarray:
+    """Fit an image onto a white square and snap every pixel to the nearest palette colour."""
+    img = img.convert("RGBA")
+    img = Image.alpha_composite(Image.new("RGBA", img.size, (255, 255, 255, 255)), img).convert("RGB")
+    s = size / max(img.size)
+    nw, nh = max(1, round(img.width * s)), max(1, round(img.height * s))
+    canvas = Image.new("RGB", (size, size), (255, 255, 255))
+    canvas.paste(img.resize((nw, nh), Image.LANCZOS), ((size - nw) // 2, (size - nh) // 2))
+    return palette.image_to_idx(canvas)
 
 
 def import_folder(cfg: Config, folder: str | None, license: str | None, source: str | None = None,
@@ -41,6 +54,7 @@ def import_folder(cfg: Config, folder: str | None, license: str | None, source: 
     out.mkdir(parents=True, exist_ok=True)
     meta = read_meta(out, cfg)
     res = int(meta["resolution"])
+    color = meta.get("palette") is not None
     slug = re.sub(r"[^a-z0-9]+", "-", root.name.lower()).strip("-") or "set"
     for f in out.glob(f"train-import-{slug}-*.npz"):          # re-importing a folder replaces it
         meta["shards"]["train"].pop(f.name, None)
@@ -63,12 +77,15 @@ def import_folder(cfg: Config, folder: str | None, license: str | None, source: 
         try:
             with Image.open(f) as im:
                 im.seek(0)
-                bits = bitmap.binarize(im, res, cfg.data.get("binarize", "otsu"))
+                if color:
+                    bits = quantize(im, res)
+                else:
+                    bits = bitmap.binarize(im, res, cfg.data.get("binarize", "otsu"))
         except Exception as e:
             log(f"  skipped {f.name}: {e}")
             n_skip += 1
             continue
-        ratio = float(bits.mean())
+        ratio = float((bits != palette.WHITE).mean()) if color else float(bits.mean())
         if ratio < 0.002 or ratio > 0.98:
             n_skip += 1
             continue

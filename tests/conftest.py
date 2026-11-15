@@ -1,4 +1,4 @@
-"""Shared fixtures: a throw-away INKOS home with tiny versions of both models."""
+"""Shared fixtures: a throw-away INKOS home with tiny versions of all four models."""
 from __future__ import annotations
 
 import sys
@@ -31,6 +31,8 @@ TINY = {
         "preview_prompts": ["manga portrait, girl"],
     },
 }
+TINY["inkos1_1"] = {**TINY["inkos1"], "preview_prompts": ["red heart", "blue note: milk; eggs"]}
+TINY["inkos1_1_pro"] = {**TINY["inkos1_pro"], "preview_prompts": ["color manga portrait, girl, red hair"]}
 
 
 def _merge(a: dict, b: dict) -> dict:
@@ -46,6 +48,7 @@ def home(tmp_path, monkeypatch):
     for mid, patch in TINY.items():
         cfg = yaml.safe_load((REPO / "configs" / f"{mid}.yaml").read_text())
         (tmp_path / "configs" / f"{mid}.yaml").write_text(yaml.safe_dump(_merge(cfg, patch)))
+    (tmp_path / "configs" / "plans.yaml").write_text((REPO / "configs" / "plans.yaml").read_text())
     for name, sub in (("ROOT", ""), ("CONFIGS", "configs"), ("DATA", "data"), ("RUNS", "runs"),
                       ("MODELS", "models"), ("PROJECTS", "projects")):
         monkeypatch.setattr(paths, name, tmp_path / sub if sub else tmp_path)

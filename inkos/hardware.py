@@ -118,7 +118,11 @@ def benchmark(model_id: str, device: torch.device, steps: int = 3) -> dict:
         loss_fn = lambda: model.loss(batch)[0]
     else:
         R = int(cfg.data.resolution)
-        batch = {"image": (torch.rand(B, 1, R, R, device=device) < 0.2).float(), "caption": ["manga portrait, girl"] * B}
+        if int(cfg.model.get("colors", 1)) > 1:
+            image = torch.randint(0, int(cfg.model.colors), (B, R, R), device=device)
+        else:
+            image = (torch.rand(B, 1, R, R, device=device) < 0.2).float()
+        batch = {"image": image, "caption": ["manga portrait, girl"] * B}
         loss_fn = lambda: model.loss(batch, refiner_crops=int(cfg.train.refiner_crops))[0]
     model.train()
     times = []

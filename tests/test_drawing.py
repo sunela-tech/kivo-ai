@@ -27,6 +27,56 @@ def test_roundtrip():
     assert ok and lang.encode(ops) == toks
 
 
+def test_colour_dialect_extends_the_vocabulary_without_moving_it():
+    """INKOS 1.1 tokens come after the INKOS 1 vocabulary, so INKOS 1 weights stay valid."""
+    assert lang.COLOR0 == lang.VOCAB == 249 and lang.VOCAB_COLOR == 255
+    mono = lang.encode(OPS)
+    ops = [("COLOR", 2)] + OPS[:4] + [("COLOR", 0)] + OPS[4:]
+    col = lang.encode(ops, lang.VOCAB_COLOR)
+    drawing = [t for t in col if not lang.COLOR0 <= t < lang.VOCAB_COLOR]
+    assert [t if t < lang.VOCAB else t - 6 for t in drawing] == mono      # only the pointers shift
+    back, ok = lang.decode(col + [lang.EOS], len(PROMPT), lang.VOCAB_COLOR)
+    assert ok and back == lang.decode(lang.encode(ops, lang.VOCAB_COLOR) + [lang.EOS], len(PROMPT), lang.VOCAB_COLOR)[0]
+    assert back[0] == ("COLOR", 2) and lang.resolve_text(back[4][5], PROMPT) == "Buy milk"
+    with pytest.raises(ValueError):
+        lang.encode(ops)                                                  # no colour in the 1-bit dialect
+    assert lang.decode(col + [lang.EOS], len(PROMPT))[1] is False         # and INKOS 1 cannot read it
+    g = lang.Grammar(4, lang.VOCAB_COLOR)
+    assert g.allowed()[lang.COLOR0: lang.VOCAB_COLOR].all() and len(g.allowed()) == lang.VOCAB_COLOR + 4
+    g.feed(lang.TOK["LINE"])
+    assert not g.allowed()[lang.COLOR0: lang.VOCAB_COLOR].any()           # not in the middle of a command
+
+
+@pytest.mark.parametrize("size", [256, 512, 1024])
+def test_colour_render_uses_only_the_six_palette_colours(size):
+    from inkos import palette
+    ops = [("COLOR", palette.RED), ("DISC", 40, 40, 20), ("COLOR", palette.BLUE), ("HAND",), ("RECT", 60, 60, 110, 110),
+           ("COLOR", palette.YELLOW), ("BOX", 70, 70, 100, 100), ("COLOR", palette.GREEN), ("TEXT", 8, 100, 8, 100, [(6, 13)]),
+           ("ERASE",), ("DISC", 40, 40, 6), ("INK",), ("LINE", [(5, 5), (120, 20)])]
+    img = render(ops, PROMPT, size, seed=1, color=True)
+    assert img.mode == "P" and img.size == (size, size) and palette.is_pure(img)
+    idx = np.asarray(img)
+    assert set(np.unique(idx)) == {palette.WHITE, palette.RED, palette.BLUE, palette.YELLOW, palette.GREEN}
+    k = size // 128
+    assert idx[40 * k, 40 * k] == palette.WHITE and idx[40 * k, 52 * k] == palette.RED      # erased centre, red ring
+    assert idx[85 * k, 85 * k] == palette.YELLOW
+    back = Image.open(io.BytesIO(bitmap.png_bytes(img)))
+    assert back.mode == "P" and len(back.getpalette()) // 3 == palette.N and (np.asarray(back) == idx).all()
+    mono = render(ops, PROMPT, size, seed=1)                              # the same program on a 1-bit canvas
+    assert mono.mode == "1" and bitmap.is_pure_bw(mono)
+
+
+def test_palette_reduction_never_blends():
+    from inkos import palette
+    idx = np.full((8, 8), palette.WHITE, dtype=np.uint8)
+    idx[:, 3] = palette.RED                        # a line one source pixel wide survives
+    idx[0:2, 6:8] = [[palette.BLUE, palette.GREEN], [palette.GREEN, palette.BLUE]]
+    out = palette.reduce(idx, 2)
+    assert out.shape == (4, 4) and (out[:, 1] == palette.RED).all() and out[1, 0] == palette.WHITE
+    assert out[0, 3] in (palette.BLUE, palette.GREEN) and set(np.unique(out)) <= set(range(palette.N))
+    assert (bitmap.unpack4(bitmap.pack4(idx)) == idx).all()
+
+
 def test_decode_stops_at_illegal_token_and_keeps_finished_ops():
     toks = lang.encode([("CIRC", 10, 10, 5), ("LINE", [(1, 1), (9, 9)])])
     ops, ok = lang.decode(toks[:-2] + [lang.TOK["CIRC"]], 0)       # a command inside an open path

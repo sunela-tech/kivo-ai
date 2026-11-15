@@ -12,6 +12,7 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw
 
+from .. import palette
 from . import lang
 from .font import ADV, LINE_H, chars_per_line, glyph, wrap_text
 
@@ -104,18 +105,31 @@ def ellipse_points(cx, cy, rx, ry, start: float = 0.0, turns: float = 1.0) -> np
 # --------------------------------------------------------------------------
 
 class _Canvas:
-    def __init__(self, size: int, seed: int):
+    """Black-and-white: pixel values are 0 (ink) / 255 (paper).
+    Colour: pixel values are palette indices, so nothing is ever blended."""
+
+    def __init__(self, size: int, seed: int, color: bool = False):
         self.size = size
+        self.is_color = color
         self.ss = _supersample(size)
         self.S = size * self.ss
         self.k = self.S / lang.GRID               # canvas px per grid unit
-        self.img = Image.new("L", (self.S, self.S), 255)
+        self.paper = palette.WHITE if color else 255
+        self.pen = palette.BLACK if color else 0  # what INK returns to after ERASE
+        self.img = Image.new("L", (self.S, self.S), self.paper)
         self.d = ImageDraw.Draw(self.img)
         self.rng = np.random.default_rng(seed)
         self.weight = 2
-        self.color = 0
+        self.color = self.pen
         self.dash = False
         self.hand = False
+
+    def set_color(self, k: int):
+        if self.is_color:
+            self.pen = int(min(palette.N - 1, max(0, k)))
+        else:                                     # a colour program on a 1-bit canvas: any ink is black
+            self.pen = 255 if k == palette.WHITE else 0
+        self.color = self.pen
 
     def px(self, p: np.ndarray) -> list[tuple[float, float]]:
         q = (np.asarray(p, dtype=float) + 0.5) * self.k
@@ -163,6 +177,8 @@ class _Canvas:
             self.d.polygon(self.px(p), fill=self.color)
 
     def finish(self) -> Image.Image:
+        if self.is_color:
+            return palette.idx_to_image(palette.reduce(np.asarray(self.img), self.ss))
         small = self.img.resize((self.size, self.size), Image.BOX) if self.ss > 1 else self.img
         return small.point(lambda v: 255 if v >= 128 else 0).convert("1", dither=Image.Dither.NONE)
 
@@ -210,17 +226,23 @@ def _draw_text(c: _Canvas, x: float, y: float, size: float, wrap: float, text: s
 # public API
 # --------------------------------------------------------------------------
 
-def render(ops: list[tuple], prompt: str = "", size: int = 256, seed: int = 0) -> Image.Image:
-    """Program -> PIL mode '1' image (white paper, black ink)."""
-    c = _Canvas(size, seed)
+def render(ops: list[tuple], prompt: str = "", size: int = 256, seed: int = 0, color: bool = False) -> Image.Image:
+    """Program -> image on white paper.
+
+    color=False: PIL mode '1', black ink only (INKOS 1).
+    color=True:  PIL mode 'P' with the six-colour E-Ink palette (INKOS 1.1).
+    """
+    c = _Canvas(size, seed, color)
     for op in ops:
         name = op[0]
         if name == "W":
             c.weight = int(min(4, max(1, op[1])))
+        elif name == "COLOR":
+            c.set_color(op[1])
         elif name == "INK":
-            c.color = 0
+            c.color = c.pen
         elif name == "ERASE":
-            c.color = 255
+            c.color = c.paper
         elif name == "SOLID":
             c.dash = False
         elif name == "DASH":
@@ -282,6 +304,7 @@ def render(ops: list[tuple], prompt: str = "", size: int = 256, seed: int = 0) -
     return c.finish()
 
 
-def render_tokens(tokens, prompt: str = "", size: int = 256, seed: int = 0) -> tuple[Image.Image, list[tuple], bool]:
-    ops, ok = lang.decode(tokens, len(prompt))
-    return render(ops, prompt, size, seed), ops, ok
+def render_tokens(tokens, prompt: str = "", size: int = 256, seed: int = 0,
+                  vocab: int = lang.VOCAB) -> tuple[Image.Image, list[tuple], bool]:
+    ops, ok = lang.decode(tokens, len(prompt), vocab)
+    return render(ops, prompt, size, seed, color=vocab > lang.VOCAB), ops, ok

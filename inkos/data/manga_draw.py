@@ -12,6 +12,7 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw
 
+from .. import palette
 from ..vector.render import catmull_rom
 
 
@@ -27,6 +28,8 @@ def halftone(density: np.ndarray, period: float = 8.0, kind: str = "dots") -> np
 
 
 class Ink:
+    is_color = False
+
     def __init__(self, w: int, h: int, ss: int = 2):
         self.w, self.h, self.ss = w, h, ss
         self.img = Image.new("L", (w * ss, h * ss), 255)
@@ -132,12 +135,54 @@ class Ink:
         return line | halftone(dens, period, kind)
 
 
-def frame(bits: np.ndarray, width: int = 3) -> np.ndarray:
-    """Black border around a panel."""
-    bits = bits.copy()
-    bits[:width, :] = bits[-width:, :] = True
-    bits[:, :width] = bits[:, -width:] = True
-    return bits
+class ColorInk(Ink):
+    """The same drawing calls on a six-colour canvas (INKOS 1.1 Pro data).
+
+    Pixels hold palette indices, so colours are flat and never blend. Colour
+    arguments are palette indices; the black-and-white convention (0 = black,
+    255 = white) is accepted too. Screentone does not exist here: colour
+    takes its place, so the tone calls do nothing.
+    """
+    is_color = True
+
+    def __init__(self, w: int, h: int, ss: int = 2):
+        self.w, self.h, self.ss = w, h, ss
+        self.img = Image.new("L", (w * ss, h * ss), palette.WHITE)
+        self.d = ImageDraw.Draw(self.img)
+        self.tone = self.t = None
+
+    @staticmethod
+    def _c(color: int) -> int:
+        return palette.WHITE if color == 255 else int(color)
+
+    def fill(self, pts, color: int | None = 255, tone: float = 0.0):
+        if color is not None and len(pts) >= 3:
+            self.d.polygon(self._p(pts), fill=self._c(color))
+
+    def tone_only(self, pts, tone: float):
+        pass
+
+    def tone_gradient(self, *args, **kwargs):
+        pass
+
+    def line(self, pts, width: float = 2.0, color: int = 0, closed: bool = False):
+        super().line(pts, width, self._c(color), closed)
+
+    def stroke(self, pts, width: float = 2.5, color: int = 0, taper: float = 0.2):
+        super().stroke(pts, width, self._c(color), taper)
+
+    def finish(self, period: float = 8.0, kind: str = "dots") -> np.ndarray:
+        """-> uint8 array (h, w) of palette indices."""
+        return palette.reduce(np.asarray(self.img), self.ss)
+
+
+def frame(a: np.ndarray, width: int = 3) -> np.ndarray:
+    """Black border around a panel (bool ink map or palette indices)."""
+    a = a.copy()
+    v = True if a.dtype == bool else palette.BLACK
+    a[:width, :] = a[-width:, :] = v
+    a[:, :width] = a[:, -width:] = v
+    return a
 
 
 def downsample2(bits: np.ndarray) -> np.ndarray:

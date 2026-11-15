@@ -1,0 +1,75 @@
+# INKOS 1.1 Pro - INKOS 1 Pro with colour: pixel diffusion over the six-colour
+# E-Ink palette (black, white, red, yellow, blue, green).
+id: inkos1_1_pro
+name: INKOS 1.1 Pro
+architecture: bit-diffusion-unet
+summary: >-
+  INKOS 1 Pro with colour. Denoises a 256 x 256 six-colour image from noise
+  under text guidance, then a learned refiner doubles it to 512 and 1024.
+  Flat palette colours, no blends. Needs a GPU to train in reasonable time.
+specialties: [colour manga characters, colour panels and pages, colour environments, flat-colour illustration]
+palette: eink6
+
+# Training target requested for this model. This is a goal, not a claim:
+# the number of epochs actually completed is recorded by the trainer.
+target_epochs: 20000
+
+model:
+  base_resolution: 256
+  patch: 4                         # pixels folded 4 x 4 -> the U-Net runs on a 64 x 64 grid
+  channels: [64, 128, 256, 384]
+  blocks_per_level: 2
+  attn_levels: [2, 3]              # self + cross attention at 16 x 16 and 8 x 8 (and in the middle)
+  heads: 8
+  text_dim: 320
+  text_layers: 4
+  text_heads: 8
+  max_prompt: 192
+  self_cond: true
+  refiner_channels: 64
+  refiner_blocks: 8
+  dropout: 0.0
+  colors: 6                        # one channel per palette colour instead of one ink bit
+
+data:
+  count: 60000                     # procedural colour manga images to generate
+  val_count: 1000
+  resolution: 512                  # stored size; the base model trains on the 2x reduction
+  shard_size: 1000
+  seed: 4
+
+train:
+  batch_size: 16                   # raise on a GPU (32-64 fits in 12 GB)
+  lr: 2.0e-4
+  min_lr: 2.0e-5
+  warmup_steps: 200
+  schedule_epochs: null
+  weight_decay: 0.01
+  betas: [0.9, 0.99]
+  grad_clip: 1.0
+  ema_decay: 0.9995
+  caption_dropout: 0.1             # enables classifier-free guidance
+  self_cond_prob: 0.5
+  refiner_crop: 128
+  refiner_crops: 1
+  log_every: 10
+  val_every_steps: 500
+  val_batches: 6
+  checkpoint_minutes: 10
+  keep_checkpoints: 2
+  seed: 4
+
+sample:
+  steps: 32
+  guidance: 3.0
+  preview_steps: 16
+
+inference:
+  sizes: [256, 512, 1024]          # 256 native; 512 and 1024 through the refiner
+  default_size: 512
+
+preview_prompts:
+  - "color manga portrait, girl, long red hair, straight bangs, green eyes, smiling, blue sailor uniform"
+  - "color manga portrait, boy, spiky blue hair, spiky bangs, angry, school jacket, speed lines"
+  - "color manga background, sea, horizon, blue sky, sailboat"
+  - "color manga page, 4 panels, girl with twin tails yellow hair, speech bubbles"

@@ -13,13 +13,14 @@
   <div class="brand">
     <span class="mark" aria-hidden="true"></span>
     <h1>INKOS</h1>
-    <p>Local 1-bit image models</p>
+    <p>Local E-Ink image models</p>
   </div>
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button role="tab" id="tab-generate" data-view="generate" aria-selected="true">Generate</button>
     <button role="tab" id="tab-gallery" data-view="gallery" aria-selected="false">Gallery</button>
     <button role="tab" id="tab-models" data-view="models" aria-selected="false">Models</button>
     <button role="tab" id="tab-training" data-view="training" aria-selected="false">Training</button>
+    <button role="tab" id="tab-plans" data-view="plans" aria-selected="false">Plans</button>
   </nav>
 </header>
 
@@ -62,6 +63,7 @@
         </details>
 
         <button type="submit" class="primary" id="generate">Generate</button>
+        <p class="hint" id="quota"></p>
 
         <div class="progress" id="progress" hidden>
           <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><span id="progress-fill"></span></div>
@@ -71,7 +73,7 @@
 
       <div class="pane result">
         <div class="frame" id="frame">
-          <p class="empty" id="frame-empty">The image appears here.<br>Pure black and white, no grey.</p>
+          <p class="empty" id="frame-empty">The image appears here.<br>Pure black and white, or six flat E-Ink colours.</p>
           <img id="result-img" alt="" hidden>
         </div>
         <div id="result-info" hidden>
@@ -125,6 +127,15 @@
       <button type="button" id="training-refresh">Refresh</button>
     </div>
     <div class="cards" id="training-cards"></div>
+  </section>
+
+  <!-- ============================ PLANS ============================ -->
+  <section class="view" id="view-plans" role="tabpanel" aria-labelledby="tab-plans" hidden>
+    <div class="toolbar">
+      <p class="lead">A plan decides which models can generate, the largest size, and how many images and projects you can have. Plans are a setting stored on this machine: there is no account and no payment. Training is never limited.</p>
+      <span class="count" id="plan-usage"></span>
+    </div>
+    <div class="cards three" id="plan-cards"></div>
   </section>
 
 </main>

@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import __version__, bitmap, hardware, paths
+from . import __version__, bitmap, hardware, paths, plans
 from .config import load_config, model_ids
 from .engine import Engine, all_status, model_status
 from .training.trainer import pid_alive, read_state
@@ -93,7 +93,9 @@ class Jobs:
                 bitmap.save_png(res["image"], folder / f"{stem}.png")
                 meta["file"] = f"{stem}.png"
                 meta["bytes"] = (folder / f"{stem}.png").stat().st_size
+                meta["plan"] = plans.current()["id"]
                 (folder / f"{stem}.json").write_text(json.dumps(meta, indent=2))
+                plans.record_image()
                 job["result"] = {"url": f"/files/{req['project']}/{stem}.png", "meta": meta}
                 job["progress"] = {"stage": "done", "fraction": 1.0, "detail": ""}
                 job["status"] = "done"
@@ -230,12 +232,15 @@ class App:
     def status(self) -> dict:
         self.hw = hardware.probe()
         models = all_status()
+        plan = plans.summary()
+        allowed = set(next(p for p in plan["plans"] if p["id"] == plan["current"])["models"])
         for m in models:
             m["checks"] = hardware.checks(self.hw, m)
             m["bench"] = hardware.read_bench().get(m["id"])
+            m["in_plan"] = m["id"] in allowed
         return {"server": {"version": __version__, "started": self.started, "device": str(self.engine.device),
                            "home": str(paths.ROOT)},
-                "hardware": self.hw, "models": models}
+                "hardware": self.hw, "models": models, "plan": plan}
 
 
 def make_handler(app: App):
@@ -298,6 +303,8 @@ def make_handler(app: App):
                 fn()
             except ApiError as e:
                 self._json({"error": str(e)}, e.status)
+            except plans.PlanError as e:
+                self._json({"error": str(e), "plan": plans.current()["id"]}, 403)
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as e:
@@ -317,6 +324,8 @@ def make_handler(app: App):
                 return self._json(app.status())
             if path == "/api/projects":
                 return self._json({"projects": list_projects()})
+            if path == "/api/plans":
+                return self._json(plans.summary())
             if path == "/api/gallery":
                 project = project_name(qs.get("project", ["default"])[0])
                 return self._json({"project": project, "images": list_gallery(project)})
@@ -363,6 +372,7 @@ def make_handler(app: App):
                 size = int(data.get("size") or cfg.inference.default_size)
                 if size not in cfg.inference.sizes:
                     raise ApiError(400, f"size must be one of {list(cfg.inference.sizes)}")
+                plans.check_generate(mid, cfg.name, size)
                 if model_status(mid)["weights"] is None:
                     raise ApiError(409, f"{cfg.name} has no trained weights yet. Train it first (see the Training tab).")
                 req = {"model": mid, "prompt": prompt[:2000], "size": size, "project": project_name(data.get("project"))}
@@ -377,8 +387,13 @@ def make_handler(app: App):
                 return self._json(app.jobs.submit(req), 202)
             if path == "/api/projects":
                 name = project_name(data.get("name"))
+                if not (paths.PROJECTS / name).is_dir():
+                    plans.check_new_project(len(list_projects()))
                 (paths.PROJECTS / name).mkdir(parents=True, exist_ok=True)
                 return self._json({"projects": list_projects(), "created": name})
+            if path == "/api/plan":
+                plans.set_plan(str(data.get("plan") or ""))
+                return self._json(plans.summary())
             if path == "/api/training/start":
                 mh = data.get("max_hours")
                 return self._json(start_training(self._model(data.get("model")), float(mh) if mh else None))
@@ -432,6 +447,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, device: str | None = None):
         w = s["weights"]
         print(f"  {s['name']}: " + (f"{w['source']} weights, {w['epochs_completed']} of {s['training']['target_epochs']} epochs trained"
                                     if w else "no trained weights yet"))
+    print(f"  plan: {plans.current()['name']}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
