@@ -23,7 +23,7 @@ import numpy as np
 from .. import paths
 from ..config import Config
 from ..vector import lang
-from . import colorize, quickdraw, store, svg_icons, synth_charts, synth_diagrams, synth_notes, synth_symbols
+from . import animate, colorize, quickdraw, store, svg_icons, synth_charts, synth_diagrams, synth_notes, synth_symbols
 
 SOURCES = paths.DATA / "sources"
 FAMILIES = {
@@ -41,9 +41,10 @@ _W: dict = {}   # per-worker state
 # INKOS 1
 # --------------------------------------------------------------------------
 
-def _v_init(max_prompt: int, max_tokens: int, icon_dir: str | None, sketch_dir: str | None, color: bool):
-    _W["max_prompt"], _W["max_tokens"], _W["color"] = max_prompt, max_tokens, color
-    _W["vocab"] = lang.VOCAB_COLOR if color else lang.VOCAB
+def _v_init(max_prompt: int, max_tokens: int, icon_dir: str | None, sketch_dir: str | None, color: bool,
+            motion: bool = False):
+    _W["max_prompt"], _W["max_tokens"], _W["color"], _W["motion"] = max_prompt, max_tokens, color or motion, motion
+    _W["vocab"] = lang.VOCAB_MOTION if motion else lang.VOCAB_COLOR if color else lang.VOCAB
     _W["icons"] = svg_icons.load_sets(Path(icon_dir)) if icon_dir else []
     _W["sketches"] = quickdraw.load(Path(sketch_dir)) if sketch_dir else []
 
@@ -84,6 +85,8 @@ def _v_shard(job) -> dict:
             colorize.colorize(d, rng, _W["max_prompt"])
             if len(lang.encode(d.ops, _W["vocab"])) + 1 > _W["max_tokens"]:
                 d.prompt, d.ops = plain                         # the coloured version is too long
+        if _W["motion"]:
+            animate.animate(d, kind, rng, _W["max_prompt"], _W["max_tokens"])
         toks = lang.encode(d.ops, _W["vocab"])
         k = V_KINDS.index(kind)
         out.append((d.prompt, toks, k))
@@ -178,8 +181,9 @@ def prepare_inkos1(cfg: Config, count: int | None = None, workers: int | None = 
     log(f"generating {n_train} training and {n_val} validation drawings with {workers} workers ...")
     stats: dict[str, dict] = {"train": {}, "val": {}}
     sizes = {"train": 0, "val": 0}
-    color = bool(cfg.model.get("color"))
-    init = (cfg.model.max_prompt, cfg.model.max_program, src["icons"], src["sketches"], color)
+    motion = bool(cfg.model.get("motion"))
+    color = bool(cfg.model.get("color")) or motion
+    init = (cfg.model.max_prompt, cfg.model.max_program, src["icons"], src["sketches"], color, motion)
     with mp.Pool(workers, initializer=_v_init, initargs=init) as pool:
         for i, res in enumerate(pool.imap_unordered(_v_shard, jobs)):
             split = res["file"].split("-")[0]
@@ -198,7 +202,8 @@ def prepare_inkos1(cfg: Config, count: int | None = None, workers: int | None = 
                         "url": "https://github.com/googlecreativelab/quickdraw-dataset"})
     meta = {
         "format": "inkscript-v1", "model": cfg.id, "kinds": V_KINDS, "grid": lang.GRID,
-        "vocab": lang.VOCAB_COLOR if color else lang.VOCAB, "palette": "eink6" if color else None,
+        "vocab": lang.VOCAB_MOTION if motion else lang.VOCAB_COLOR if color else lang.VOCAB,
+        "palette": "eink6" if color else None, "motion": motion,
         "train_count": sizes["train"], "val_count": sizes["val"], "by_kind": stats,
         "distinct_icons": n_icons, "distinct_sketches": n_sk, "seed": cfg.data.seed,
         "sources": sources, "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(time.time() - t0, 1),
@@ -211,5 +216,8 @@ def prepare_inkos1(cfg: Config, count: int | None = None, workers: int | None = 
 def prepare(cfg: Config, **kw) -> dict:
     if cfg.architecture == "inkscript-transformer":
         return prepare_inkos1(cfg, **kw)
+    if cfg.architecture == "video-diffusion-unet":
+        from .prepare_motion import prepare_motion
+        return prepare_motion(cfg, **kw)
     from .prepare_raster import prepare_pro
     return prepare_pro(cfg, **kw)

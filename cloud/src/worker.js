@@ -9,11 +9,13 @@
 import APP from '../public/data/app.json' with { type: 'json' };
 import { AuthError, issuerFromPublishableKey, userPlans, verifySessionToken } from './auth.js';
 import STATIC from './static.gen.js';
+import { CostError, tokenCost } from './usage.js';
 
 const MODELS = new Map(APP.models.filter((m) => m.cloud).map((m) => [m.id, m]));
 const PLANS = APP.plans;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/;
 const MAX_PNG = 512 * 1024;
+const MAX_GIF = 1900 * 1024;          // a D1 row holds up to 2 MB
 const MAX_BODY = 1024 * 1024;
 
 class HttpError extends Error {
@@ -47,10 +49,11 @@ async function authenticate(request, env) {
 }
 
 async function usage(env, user) {
-  const row = await env.DB.prepare('SELECT images FROM usage WHERE user_id = ?1 AND day = ?2').bind(user.userId, today()).first();
-  const images = row ? row.images : 0;
-  const limit = user.plan.images_per_day;
-  return { date: today(), images, limit, remaining: limit === null ? null : Math.max(0, limit - images) };
+  const row = await env.DB.prepare('SELECT images, tokens FROM usage WHERE user_id = ?1 AND day = ?2').bind(user.userId, today()).first();
+  const images = row ? row.images : 0, tokens = row ? row.tokens : 0;
+  const limit = user.plan.tokens_per_day;
+  return { date: today(), images, tokens, limit, remaining: limit === null ? null : Math.max(0, limit - tokens),
+    percent: limit ? Math.min(100, Math.round((1000 * tokens) / limit) / 10) : null };
 }
 
 async function projectNames(env, user) {
@@ -90,6 +93,12 @@ function pngSize(bytes) {
   return { w: dv.getUint32(16), h: dv.getUint32(20), depth: bytes[24], type: bytes[25] };
 }
 
+function gifSize(bytes) {
+  const head = String.fromCharCode(...bytes.subarray(0, 6));
+  if (bytes.length < 14 || (head !== 'GIF89a' && head !== 'GIF87a')) return null;
+  return { w: bytes[6] | (bytes[7] << 8), h: bytes[8] | (bytes[9] << 8) };
+}
+
 // ---------------------------------------------------------------------------
 // routes
 
@@ -110,16 +119,21 @@ async function api(request, env, url) {
     const b = await body(request);
     const model = checkModel(user, String(b.model || ''));
     checkSize(user, model, Number(b.size));
-    const limit = user.plan.images_per_day ?? 2 ** 31 - 1;
-    // one atomic statement: count the image only while the day's allowance lasts
-    const row = await env.DB.prepare(
-      `INSERT INTO usage (user_id, day, images) VALUES (?1, ?2, 1)
-       ON CONFLICT (user_id, day) DO UPDATE SET images = images + 1 WHERE usage.images < ?3
-       RETURNING images`).bind(user.userId, today(), limit).first();
-    if (!row || row.images > limit) {
-      throw new HttpError(403, `Today's ${user.plan.images_per_day} images of the ${user.plan.name} plan are used up.`, { upgrade: true });
+    let cost;
+    try { cost = tokenCost(APP.usage, model.id, Number(b.size), b.steps); } catch (e) {
+      if (e instanceof CostError) throw new HttpError(400, e.message);
+      throw e;
     }
-    return json({ ok: true, usage: await usage(env, user) });
+    const limit = user.plan.tokens_per_day ?? 2 ** 50;
+    const spent = () => new HttpError(403, `This needs ${cost.toLocaleString('en-US')} tokens, more than is left of today's usage on the ${user.plan.name} plan.`, { upgrade: true });
+    if (cost > limit) throw spent();
+    // one atomic statement: charge the tokens only while the day's allowance covers them
+    const row = await env.DB.prepare(
+      `INSERT INTO usage (user_id, day, images, tokens) VALUES (?1, ?2, 1, ?3)
+       ON CONFLICT (user_id, day) DO UPDATE SET images = images + 1, tokens = tokens + ?3 WHERE usage.tokens + ?3 <= ?4
+       RETURNING tokens`).bind(user.userId, today(), cost, limit).first();
+    if (!row || row.tokens > limit) throw spent();
+    return json({ ok: true, cost, usage: await usage(env, user) });
   }
 
   if (path === '/api/projects' && method === 'GET') {
@@ -156,12 +170,13 @@ async function api(request, env, url) {
     const project = String(b.project || 'default');
     if (!(await projectNames(env, user)).includes(project)) throw new HttpError(400, 'no such project');
     let png;
-    try { png = Uint8Array.from(atob(String(b.png || '')), (c) => c.charCodeAt(0)); } catch { throw new HttpError(400, 'png must be base64'); }
-    if (png.length > MAX_PNG) throw new HttpError(413, 'image too large');
-    const info = pngSize(png);
-    if (!info || info.w !== info.h) throw new HttpError(400, 'not an INKOS PNG');
+    try { png = Uint8Array.from(atob(String(b.png || b.gif || '')), (c) => c.charCodeAt(0)); } catch { throw new HttpError(400, 'the file must be base64'); }
     const meta = b.meta && typeof b.meta === 'object' ? b.meta : {};
     const model = checkModel(user, String(meta.model || ''));
+    const video = model.media === 'video';
+    if (png.length > (video ? MAX_GIF : MAX_PNG)) throw new HttpError(413, 'file too large for the gallery');
+    const info = video ? gifSize(png) : pngSize(png);
+    if (!info || info.w !== info.h) throw new HttpError(400, video ? 'not an INKOS GIF' : 'not an INKOS PNG');
     checkSize(user, model, info.w);
     const clean = {
       model: model.id, model_name: model.name, size: info.w, prompt: String(meta.prompt || '').slice(0, 2000),
@@ -170,6 +185,8 @@ async function api(request, env, url) {
       steps: Number.isFinite(meta.steps) ? meta.steps : null, guidance: Number.isFinite(meta.guidance) ? meta.guidance : null,
       backend: ['webgpu', 'wasm'].includes(meta.backend) ? meta.backend : null,
       colors: meta.colors && typeof meta.colors === 'object' ? meta.colors : null, bytes: png.length,
+      media: video ? 'gif' : 'png', frames: video && Number.isFinite(meta.frames) ? meta.frames : null,
+      fps: video && Number.isFinite(meta.fps) ? meta.fps : null, tokens_used: Number.isFinite(meta.tokens_used) ? meta.tokens_used : null,
       weights: model.training ? { epochs_completed: model.training.epochs_completed, epoch_progress: model.training.epoch_progress,
         samples_seen: model.training.samples_seen, target_epochs: model.target_epochs } : null,
     };
@@ -185,8 +202,9 @@ async function api(request, env, url) {
     const row = await env.DB.prepare('SELECT png, meta FROM images WHERE id = ?1 AND user_id = ?2').bind(one[1], user.userId).first();
     if (!row) throw new HttpError(404, 'not found');
     const bytes = row.png instanceof ArrayBuffer ? new Uint8Array(row.png) : new Uint8Array(row.png);
-    const name = `inkos-${one[1]}.png`;
-    return new Response(bytes, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=86400',
+    const gif = gifSize(bytes) !== null;
+    const name = `inkos-${one[1]}.${gif ? 'gif' : 'png'}`;
+    return new Response(bytes, { headers: { 'content-type': gif ? 'image/gif' : 'image/png', 'cache-control': 'private, max-age=86400',
       'content-disposition': `${url.searchParams.has('download') ? 'attachment' : 'inline'}; filename="${name}"` } });
   }
   if (one && method === 'DELETE') {

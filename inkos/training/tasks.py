@@ -92,4 +92,7 @@ def get_task(cfg: Config):
     if cfg.architecture == "bit-diffusion-unet":
         from .task_pro import ProTask
         return ProTask(cfg)
+    if cfg.architecture == "video-diffusion-unet":
+        from .task_motion import MotionProTask
+        return MotionProTask(cfg)
     raise ValueError(f"unknown architecture {cfg.architecture!r}")

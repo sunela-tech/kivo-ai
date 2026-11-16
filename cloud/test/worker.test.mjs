@@ -26,7 +26,7 @@ class Stmt {
 }
 function d1() {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(here('../migrations/0001_init.sql'), 'utf8'));
+  for (const f of ['0001_init.sql', '0002_tokens.sql']) db.exec(readFileSync(here(`../migrations/${f}`), 'utf8'));
   return { db, prepare: (sql) => new Stmt(db, sql) };
 }
 // Workers KV holding the weights, as upload_files.py uploads them: the INKOS 1
@@ -97,11 +97,12 @@ test('publishable key decodes to the Frontend API issuer', () => {
 
 test('plan claims map to INKOS plans; the best plan wins', () => {
   assert.deepEqual(userPlans({ pla: 'u:user_plus,o:org_plan' }), ['user_plus']);
-  assert.equal(planFor({}).id, 'basic');
-  assert.equal(planFor({ pla: 'u:free_user' }).id, 'basic');
+  assert.equal(planFor({}).id, 'free');
+  assert.equal(planFor({ pla: 'u:free_user' }).id, 'free');
   assert.equal(planFor({ pla: 'u:user_plus' }).id, 'plus');
   assert.equal(planFor({ pla: 'u:user_pro' }).id, 'studio');
-  assert.equal(planFor({ pla: 'o:user_pro' }).id, 'basic');          // organisation plans are not user plans
+  assert.equal(planFor({ pla: 'u:user_ultra' }).id, 'ultra');
+  assert.equal(planFor({ pla: 'o:user_pro' }).id, 'free');           // organisation plans are not user plans
   assert.equal(planFor({ pla: 'u:free_user,u:user_pro' }).id, 'studio');
 });
 
@@ -127,7 +128,7 @@ test('anything but a valid Clerk session token is refused', async () => {
   const ok = await call('GET', '/api/me', { tok: await token() });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.userId, 'user_a');
-  assert.equal(ok.body.plan.id, 'basic');
+  assert.equal(ok.body.plan.id, 'free');
 });
 
 test('config exposes only the public key', async () => {
@@ -152,36 +153,49 @@ test('weights are only served to plans that include the model', async () => {
   assert.equal((await call('GET', '/weights/inkos1_1%2ebin', { tok: basic })).status, 404);
 });
 
-test('generation tickets enforce model, size and the daily allowance atomically', async () => {
+test('generation tickets charge tokens against the daily allowance, atomically', async () => {
   const { env, call } = setup();
-  const basic = await token();
-  let r = await call('POST', '/api/generations', { tok: basic, body: { model: 'inkos1_1', size: 512 } });
+  const day = new Date().toISOString().slice(0, 10);
+  const free = await token();
+  let r = await call('POST', '/api/generations', { tok: free, body: { model: 'inkos1_1', size: 512 } });
   assert.equal(r.status, 403);
-  assert.match(r.body.error, /INKOS 1.1 is not part of the Basic plan/);
+  assert.match(r.body.error, /INKOS 1.1 is not part of the Free plan/);
   assert.equal(r.body.upgrade, true);
-  r = await call('POST', '/api/generations', { tok: basic, body: { model: 'inkos1', size: 1024 } });
+  r = await call('POST', '/api/generations', { tok: free, body: { model: 'inkos1', size: 1024 } });
   assert.equal(r.status, 403);
   assert.match(r.body.error, /up to 512 px/);
-  r = await call('POST', '/api/generations', { tok: basic, body: { model: 'inkos1', size: 512 } });
+  r = await call('POST', '/api/generations', { tok: free, body: { model: 'inkos1', size: 512 } });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.usage.images, 1);
-  assert.deepEqual(r.body.usage.remaining, 29);
-  env.DB.db.prepare('UPDATE usage SET images = 30').run();
-  r = await call('POST', '/api/generations', { tok: basic, body: { model: 'inkos1', size: 256 } });
+  assert.equal(r.body.cost, 1000);
+  assert.deepEqual([r.body.usage.tokens, r.body.usage.limit, r.body.usage.percent, r.body.usage.images], [1000, 30000, 3.3, 1]);
+  env.DB.db.prepare('UPDATE usage SET tokens = 29500').run();
+  r = await call('POST', '/api/generations', { tok: free, body: { model: 'inkos1', size: 256 } });
   assert.equal(r.status, 403);
-  assert.match(r.body.error, /used up/);
-  // another user is not affected; Studio has no limit
-  const studio = await token({ sub: 'user_b', pla: 'u:user_pro' });
-  env.DB.db.prepare("INSERT INTO usage VALUES ('user_b', ?, 100000)").run(new Date().toISOString().slice(0, 10));
-  r = await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos1_1', size: 1024 } });
+  assert.match(r.body.error, /more than is left of today's usage/);
+  assert.equal(env.DB.db.prepare("SELECT tokens FROM usage WHERE user_id = 'user_a'").get().tokens, 29500);
+
+  // plans: Plus has INKOS 1 Pro but not 1.1 Pro; the cost follows steps and size; steps are checked
+  const plus = await token({ sub: 'user_b', pla: 'u:user_plus' });
+  assert.equal((await call('POST', '/api/generations', { tok: plus, body: { model: 'inkos1_1_pro', size: 512, steps: 16 } })).status, 403);
+  r = await call('POST', '/api/generations', { tok: plus, body: { model: 'inkos1_pro', size: 512, steps: 16 } });
   assert.equal(r.status, 200);
-  assert.equal(r.body.usage.limit, null);
+  assert.equal(r.body.cost, 17600);
+  for (const steps of [undefined, 4, 65, 16.5, 'x']) {
+    r = await call('POST', '/api/generations', { tok: plus, body: { model: 'inkos1_pro', size: 512, steps } });
+    assert.equal(r.status, 400, String(steps));
+  }
+  const studio = await token({ sub: 'user_s', pla: 'u:user_pro' });
+  assert.equal((await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos1_1_pro', size: 1024, steps: 32 } })).body.cost, 49280);
+  assert.equal((await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos_motion1', size: 256 } })).status, 400);   // not in the cloud app yet
+  r = await call('GET', '/api/me', { tok: await token({ sub: 'user_u', pla: 'u:user_ultra' }) });
+  assert.deepEqual([r.body.plan.id, r.body.usage.limit], ['ultra', 3000000]);
+
   // concurrent tickets never exceed the allowance
-  const plus = await token({ sub: 'user_c', pla: 'u:user_plus' });
-  env.DB.db.prepare("INSERT INTO usage VALUES ('user_c', ?, 295)").run(new Date().toISOString().slice(0, 10));
-  const res = await Promise.all(Array.from({ length: 12 }, () => call('POST', '/api/generations', { tok: plus, body: { model: 'inkos1_1', size: 1024 } })));
-  assert.equal(res.filter((x) => x.status === 200).length, 5);
-  assert.equal(env.DB.db.prepare("SELECT images FROM usage WHERE user_id = 'user_c'").get().images, 300);
+  env.DB.db.prepare("INSERT INTO usage (user_id, day, images, tokens) VALUES ('user_c', ?, 0, 145000)").run(day);
+  const plus2 = await token({ sub: 'user_c', pla: 'u:user_plus' });
+  const res = await Promise.all(Array.from({ length: 12 }, () => call('POST', '/api/generations', { tok: plus2, body: { model: 'inkos1_1', size: 1024 } })));
+  assert.equal(res.filter((x) => x.status === 200).length, 4);             // 4 x 1,200 tokens fit in the last 5,000
+  assert.equal(env.DB.db.prepare("SELECT tokens FROM usage WHERE user_id = 'user_c'").get().tokens, 149800);
 });
 
 test('projects follow the plan; the gallery is private to each user', async () => {
@@ -241,28 +255,31 @@ test('weights stream from KV with their size', async () => {
   assert.equal(r.body.length, readFileSync(here('../public/weights/inkos1.bin')).length);
 });
 
-test('Pro graphs: Studio only, stored in parts and streamed back whole', async () => {
+test('Pro graphs follow the plans, stored in parts and streamed back whole', async () => {
   const { call } = setup();
-  const pro = APP.models.find((m) => m.id === 'inkos1_pro');
+  const pro = APP.models.find((m) => m.id === 'inkos1_1_pro');
   assert.equal(pro.engine, 'pro');
   const bytes = new Uint8Array(250_000).map((_, i) => (i * 31 + 7) & 255);
-  storeKV('weights/inkos1_pro/step.onnx', bytes, 100_000);           // 3 parts
+  storeKV('weights/inkos1_1_pro/step.onnx', bytes, 100_000);           // 3 parts
+  storeKV('weights/inkos1_1_pro/manifest.json', new TextEncoder().encode('{"model":"inkos1_1_pro"}'), 1 << 20);
   storeKV('weights/inkos1_pro/manifest.json', new TextEncoder().encode('{"model":"inkos1_pro"}'), 1 << 20);
   for (const pla of [undefined, 'u:user_plus']) {
-    const r = await call('GET', '/weights/inkos1_pro/step.onnx', { tok: await token(pla ? { pla } : {}) });
+    const r = await call('GET', '/weights/inkos1_1_pro/step.onnx', { tok: await token(pla ? { pla } : {}) });
     assert.equal(r.status, 403);
     assert.equal(r.body.upgrade, true);
   }
+  assert.equal((await call('GET', '/weights/inkos1_pro/manifest.json', { tok: await token() })).status, 403);              // Free
+  assert.equal((await call('GET', '/weights/inkos1_pro/manifest.json', { tok: await token({ pla: 'u:user_plus' }) })).status, 200);
   const studio = await token({ pla: 'u:user_pro' });
-  const r = await call('GET', '/weights/inkos1_pro/step.onnx', { tok: studio });
+  const r = await call('GET', '/weights/inkos1_1_pro/step.onnx', { tok: studio });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('content-type'), 'application/octet-stream');
   assert.deepEqual(r.body, bytes);
-  const m = await call('GET', '/weights/inkos1_pro/manifest.json', { tok: studio });
-  assert.deepEqual(m.body, { model: 'inkos1_pro' });
-  assert.equal((await call('GET', '/weights/inkos1_pro/refiner.onnx', { tok: studio })).status, 404);    // not uploaded
-  assert.equal((await call('GET', '/weights/inkos1_pro/%2e%2e%2fstep.onnx', { tok: studio })).status, 404);
-  assert.equal((await call('GET', '/weights/inkos1_pro/step.onnx')).status, 401);
+  const m = await call('GET', '/weights/inkos1_1_pro/manifest.json', { tok: studio });
+  assert.deepEqual(m.body, { model: 'inkos1_1_pro' });
+  assert.equal((await call('GET', '/weights/inkos1_1_pro/refiner.onnx', { tok: studio })).status, 404);    // not uploaded
+  assert.equal((await call('GET', '/weights/inkos1_1_pro/%2e%2e%2fstep.onnx', { tok: studio })).status, 404);
+  assert.equal((await call('GET', '/weights/inkos1_1_pro/step.onnx')).status, 401);
 });
 
 test('onnxruntime-web is public, versioned and only from its own keys', async () => {

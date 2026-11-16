@@ -146,18 +146,21 @@ def cmd_plan(a):
             print(f"  price            {p['price']}")
         print(f"  models           {', '.join(names.get(m, m) for m in p['models'])}")
         print(f"  largest size     {p['max_size'] or 'any'} px")
-        print(f"  images per day   {p['images_per_day'] if p['images_per_day'] is not None else 'unlimited'}")
+        print(f"  tokens per day   {p['tokens_per_day']:,}" if p['tokens_per_day'] is not None else "  tokens per day   unlimited")
         print(f"  projects         {p['projects'] if p['projects'] is not None else 'unlimited'}")
     u = s["usage"]
-    print(f"\nused today: {u['images']}" + (f" of {u['limit']}" if u["limit"] is not None else " (no daily limit)"))
+    print(f"\nused today: {u['tokens']:,} tokens" + (f" of {u['limit']:,} ({u['percent']}%)" if u["limit"] is not None else " (no daily limit)"))
     print("Plans are a local setting. Change with:  python -m inkos plan --set <id>")
 
 
 def cmd_generate(a):
     from . import plans
     from .engine import Engine
+    cfg = load_config(a.model)
+    a.size = int(a.size or cfg.inference.default_size)
+    steps = a.steps or (int(cfg.sample.steps) if "steps" in cfg.sample else None)
     try:
-        plans.check_generate(a.model, load_config(a.model).name, a.size)
+        tokens = plans.check_generate(a.model, cfg.name, a.size, steps)
     except plans.PlanError as e:
         sys.exit(f"{e}  (python -m inkos plan --set <id>)")
     eng = Engine()
@@ -168,11 +171,19 @@ def cmd_generate(a):
     except (RuntimeError, ValueError) as e:      # e.g. a model that has never been trained
         sys.exit(str(e))
     print(file=sys.stderr)
+    from pathlib import Path
+
     from . import bitmap
-    out = bitmap.save_png(res["image"], a.out)
-    plans.record_image()
+    if res.get("video"):
+        out = Path(a.out).with_suffix(".gif")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(res["video"])
+    else:
+        out = bitmap.save_png(res["image"], a.out)
+    used = plans.record(tokens)
     print(f"wrote {out}  ({a.size}x{a.size}, seed {res['meta']['seed']}, {time.time() - t0:.1f} s, "
-          f"weights: {res['meta']['weights']['source']}, {_epochs(res['meta']['weights']['epochs_completed'])} trained)")
+          f"weights: {res['meta']['weights']['source']}, {_epochs(res['meta']['weights']['epochs_completed'])} trained, "
+          f"{tokens:,} tokens; {used['tokens']:,} used today)")
 
 
 def cmd_serve(a):
@@ -246,12 +257,12 @@ def main(argv=None):
     g = sub.add_parser("generate", help="generate one PNG")
     g.add_argument("--model", required=True, choices=ids)
     g.add_argument("--prompt", required=True)
-    g.add_argument("--size", type=int, default=512, choices=[256, 512, 1024])
+    g.add_argument("--size", type=int, default=None, choices=[256, 512, 1024], help="output size (default: the model's)")
     g.add_argument("--seed", type=int)
     g.add_argument("--steps", type=int, help="[Pro] denoising steps")
     g.add_argument("--guidance", type=float, help="[Pro] classifier-free guidance scale")
     g.add_argument("--temperature", type=float, help="[INKOS 1] sampling temperature")
-    g.add_argument("--out", default="inkos.png")
+    g.add_argument("--out", default="inkos.png", help="output file; the MOTION models write a .gif")
     g.set_defaults(fn=cmd_generate)
 
     v = sub.add_parser("serve", help="start the local server and HTML interface")

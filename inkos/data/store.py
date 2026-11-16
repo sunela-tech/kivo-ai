@@ -250,3 +250,69 @@ class RasterSet:
                 done += 1
             used = nb * batch_size
             pending = (bits[used:], caps[used:], kinds[used:]) if used < len(kinds) else None
+
+
+# --------------------------------------------------------------------------
+# clips (INKOS MOTION 1 Pro): uint8 palette indices [N, F, H, W], four bits per pixel
+# --------------------------------------------------------------------------
+
+def write_clip_shard(path: Path, clips: list[np.ndarray], captions: list[str], kinds: list[int]):
+    caps = [np.frombuffer(c.encode("ascii", "replace"), dtype=np.uint8) for c in captions]
+    np.savez_compressed(
+        path,
+        idx4=bitmap.pack4(np.stack(clips)),
+        caption=np.concatenate(caps) if caps else np.zeros(0, np.uint8),
+        caption_off=np.cumsum([0] + [len(c) for c in caps]).astype(np.int64),
+        kind=np.asarray(kinds, dtype=np.uint8),
+    )
+
+
+class ClipSet:
+    """Streams clip shards, a few at a time, shuffled per epoch."""
+
+    def __init__(self, root: Path, split: str = "train", pool: int = 2):
+        self.root = Path(root)
+        self.meta = _meta(self.root)
+        self.kinds = self.meta["kinds"]
+        self.files = sorted(self.root.glob(f"{split}-*.npz"))
+        if not self.files:
+            raise FileNotFoundError(f"no {split} shards in {self.root}")
+        counts = self.meta["shards"][split]
+        self.counts = [int(counts[f.name]) for f in self.files]
+        self.n = sum(self.counts)
+        self.pool = pool
+
+    def __len__(self) -> int:
+        return self.n
+
+    def steps_per_epoch(self, batch_size: int) -> int:
+        return (self.n + batch_size - 1) // batch_size
+
+    def batches(self, epoch: int, batch_size: int, seed: int, skip: int = 0, shuffle: bool = True):
+        """Yields {'clip': long [B,F,H,W], 'caption': [str], 'kind': long [B]}; an epoch is ceil(n / batch) batches."""
+        order = np.random.default_rng([seed, epoch, 7]).permutation(len(self.files)) if shuffle else np.arange(len(self.files))
+        step, carry = 0, None
+        for gi in range(0, len(order), self.pool):
+            clips, caps, kinds = [], [], []
+            for i in order[gi: gi + self.pool]:
+                z = np.load(self.files[int(i)])
+                off, raw = z["caption_off"], z["caption"].tobytes().decode("ascii")
+                clips.append(z["idx4"])
+                caps.extend(raw[off[k]: off[k + 1]] for k in range(len(off) - 1))
+                kinds.append(z["kind"])
+            clips, kinds = np.concatenate(clips), np.concatenate(kinds)
+            if shuffle:
+                p = np.random.default_rng([seed, epoch, gi, 11]).permutation(len(kinds))
+                clips, kinds, caps = clips[p], kinds[p], [caps[int(j)] for j in p]
+            if carry is not None:
+                clips, caps, kinds = np.concatenate([carry[0], clips]), carry[1] + caps, np.concatenate([carry[2], kinds])
+            last = gi + self.pool >= len(order)
+            n_full = len(kinds) // batch_size
+            for b in range(n_full + (1 if last and len(kinds) % batch_size else 0)):
+                s = slice(b * batch_size, (b + 1) * batch_size)
+                if step >= skip:
+                    yield {"clip": torch.from_numpy(bitmap.unpack4(clips[s]).astype(np.int64)),
+                           "caption": caps[s], "kind": torch.from_numpy(kinds[s].astype(np.int64))}
+                step += 1
+            r = slice(n_full * batch_size, None)
+            carry = None if last else (clips[r], caps[r], kinds[r])

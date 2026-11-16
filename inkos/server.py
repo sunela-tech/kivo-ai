@@ -31,10 +31,10 @@ from .engine import Engine, all_status, model_status
 from .training.trainer import pid_alive, read_state
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
-FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png$")
+FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|gif)$")
 MAX_BODY = 64 * 1024
 MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-        ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".json": "application/json",
+        ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".gif": "image/gif", ".json": "application/json",
         ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
@@ -90,13 +90,18 @@ class Jobs:
                 meta["project"] = req["project"]
                 stem = f"{time.strftime('%Y%m%d-%H%M%S')}-{req['model']}-{meta['seed']}"
                 folder = paths.PROJECTS / req["project"]
-                bitmap.save_png(res["image"], folder / f"{stem}.png")
-                meta["file"] = f"{stem}.png"
-                meta["bytes"] = (folder / f"{stem}.png").stat().st_size
+                bitmap.save_png(res["image"], folder / f"{stem}.png")      # the picture, or a clip's last frame
+                name = f"{stem}.png"
+                if res.get("video"):
+                    name = f"{stem}.gif"
+                    (folder / name).write_bytes(res["video"])
+                meta["file"] = name
+                meta["bytes"] = (folder / name).stat().st_size
                 meta["plan"] = plans.current()["id"]
+                meta["tokens_used"] = req.get("tokens")
                 (folder / f"{stem}.json").write_text(json.dumps(meta, indent=2))
-                plans.record_image()
-                job["result"] = {"url": f"/files/{req['project']}/{stem}.png", "meta": meta}
+                plans.record(req.get("tokens") or 0)
+                job["result"] = {"url": f"/files/{req['project']}/{name}", "meta": meta}
                 job["progress"] = {"stage": "done", "fraction": 1.0, "detail": ""}
                 job["status"] = "done"
             except Exception as e:  # report, never crash the worker
@@ -175,7 +180,8 @@ def list_gallery(project: str, limit: int = 200) -> list[dict]:
             meta = json.loads(png.with_suffix(".json").read_text())
         except (OSError, ValueError):
             meta = {}
-        items.append({"file": png.name, "url": f"/files/{project}/{png.name}", "meta": meta})
+        f = png.with_suffix(".gif") if png.with_suffix(".gif").exists() else png       # a clip: show the GIF
+        items.append({"file": f.name, "url": f"/files/{project}/{f.name}", "meta": meta})
     return items
 
 
@@ -345,7 +351,7 @@ def make_handler(app: App):
                 if not FILE_RE.match(parts[2]):
                     raise ApiError(404, "not found")
                 return self._file(paths.PROJECTS / project / parts[2], paths.PROJECTS, "download" in qs)
-            if parts[:1] == ["runs"] and path.endswith(".png") and len(parts) >= 4 and parts[2] in ("samples", "eval"):
+            if parts[:1] == ["runs"] and path.endswith((".png", ".gif")) and len(parts) >= 4 and parts[2] in ("samples", "eval"):
                 return self._file(paths.ROOT / path.lstrip("/"), paths.RUNS)
             if path in ("/", "/index.html"):
                 return self._file(paths.WEB / "index.html", paths.WEB)
@@ -372,11 +378,14 @@ def make_handler(app: App):
                 size = int(data.get("size") or cfg.inference.default_size)
                 if size not in cfg.inference.sizes:
                     raise ApiError(400, f"size must be one of {list(cfg.inference.sizes)}")
-                plans.check_generate(mid, cfg.name, size)
+                steps = data.get("steps")
+                steps = int(steps) if steps not in (None, "") else (int(cfg.sample.steps) if "steps" in cfg.sample else None)
+                tokens = plans.check_generate(mid, cfg.name, size, steps)
                 if model_status(mid)["weights"] is None:
                     raise ApiError(409, f"{cfg.name} has no trained weights yet. Train it first (see the Training tab).")
-                req = {"model": mid, "prompt": prompt[:2000], "size": size, "project": project_name(data.get("project"))}
-                for key, lo, hi, cast in (("seed", 0, 2 ** 31 - 1, int), ("steps", 1, 200, int),
+                req = {"model": mid, "prompt": prompt[:2000], "size": size, "project": project_name(data.get("project")),
+                       "tokens": tokens}
+                for key, lo, hi, cast in (("seed", 0, 2 ** 31 - 1, int), ("steps", 8, 64, int),
                                           ("guidance", 0.0, 20.0, float), ("temperature", 0.0, 2.0, float)):
                     if data.get(key) not in (None, ""):
                         try:

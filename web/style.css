@@ -123,6 +123,13 @@ details.more[open] summary { border-bottom: var(--rule); }
 .bar.slim { height: 16px; padding: 2px; }
 .progress p { font: 15px var(--mono); margin-top: 8px; }
 
+/* today's usage, as a share of the plan's daily allowance */
+.usage { margin-top: 12px; }
+.usage .hint { margin-top: 6px; }
+.usage.wide { min-width: min(100%, 360px); }
+.meter { height: 16px; border: var(--rule); padding: 2px; background: var(--paper); }
+.meter span { display: block; height: 100%; width: 0; background: var(--ink); }
+
 .frame { border: var(--rule); background: var(--paper); aspect-ratio: 1 / 1; width: 100%; display: flex; align-items: center; justify-content: center;
          overflow: hidden; }
 .frame.actual { overflow: auto; align-items: flex-start; justify-content: flex-start; }

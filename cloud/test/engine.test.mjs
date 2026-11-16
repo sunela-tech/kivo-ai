@@ -11,6 +11,9 @@ import * as lang from '../public/engine/lang.js';
 import { generate, loadModel } from '../public/engine/model.js';
 import { encodePNG } from '../public/engine/png.js';
 import { render, setFont, wrapText } from '../public/engine/render.js';
+import * as motion from '../public/engine/motion.js';
+import { FRAMES, frameOps, frameTime } from '../public/engine/motion.js';
+import { encodeGIF } from '../public/engine/gif.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const FIX = JSON.parse(readFileSync(here('./fixtures.json'), 'utf8'));
@@ -54,18 +57,18 @@ test('prompt normalisation and word wrap match Python', () => {
   for (const [text, n, want] of FIX.wrap) assert.deepEqual(wrapText(text, n), want, text);
 });
 
-for (const id of ['inkos1', 'inkos1_1']) {
-  test(`${id}: greedy decoding gives exactly the PyTorch tokens`, () => {
+for (const id of ['inkos1', 'inkos1_1', 'inkos_motion1']) {
+  test(`${id}: greedy decoding gives exactly the PyTorch tokens`, { skip: !FIX.models[id] && `${id} is not installed` }, () => {
     const m = model(id);
     const fx = FIX.models[id];
-    assert.equal(m.cfg.vocab, fx.color ? lang.VOCAB_COLOR : lang.VOCAB);
+    assert.equal(m.cfg.vocab, id === 'inkos_motion1' ? lang.VOCAB_MOTION : fx.color ? lang.VOCAB_COLOR : lang.VOCAB);
     for (const c of fx.cases) {
       const res = generate(m, c.prompt, { temperature: 0, maxTokens: 200 });
       assert.deepEqual(res.tokens, c.tokens, c.prompt);
       assert.equal(res.complete, c.complete);
       const back = lang.decode([...res.tokens, lang.EOS], c.prompt.length, m.cfg.vocab);
       assert.ok(back.ok);
-      const clean = res.ops.filter((o) => !(o.length === 1 && o[0] === 'HAND'));   // see make_fixtures.py
+      const clean = res.ops.filter((o) => !(o.length === 1 && o[0] === 'HAND') && o[0] !== 'AT' && o[0] !== 'ANIM');   // see make_fixtures.py
       const js = render(clean, c.prompt, 256, 0, fx.color).pixels;
       const { iou, colour } = compare(js, pixels(c.render256));
       assert.ok(iou > 0.85, `${c.prompt}: ink overlap with the Python render ${iou.toFixed(3)}`);
@@ -138,4 +141,83 @@ test('sampling: same seed, same drawing; output always parses', () => {
     assert.ok(r.tokens.length <= 60);
     assert.deepEqual(lang.decode([...r.tokens, lang.EOS], 9, m.cfg.vocab).ops, r.ops);
   }
+});
+
+// ---------------------------------------------------------------------------
+// INKOS MOTION 1: frame programs and GIF
+
+test('motion: every frame program matches Python', () => {
+  const M = FIX.motion;
+  assert.equal(M.frames, FRAMES);
+  for (const k of ['FRAMES', 'FPS', 'U_END', 'DUR']) assert.equal(motion[k], APP.motion[k], k);
+  assert.equal(lang.VOCAB_MOTION, APP.motion.VOCAB_MOTION);
+  assert.deepEqual(lang.EFFECTS, APP.motion.EFFECTS);
+  const flat = (v) => (Array.isArray(v) ? v.flatMap(flat) : [v]);
+  for (let f = 0; f < FRAMES; f++) {
+    const js = frameOps(M.ops, M.prompt, frameTime(f)), py = M.frame_ops[f];
+    assert.equal(js.length, py.length, `frame ${f}: number of commands`);
+    js.forEach((op, i) => {
+      const a = flat(op), b = flat(py[i]);
+      assert.equal(a.length, b.length, `frame ${f} command ${i}`);
+      a.forEach((v, j) => (typeof v === 'number' ? assert.ok(Math.abs(v - b[j]) < 1e-9, `frame ${f} command ${i}: ${v} vs ${b[j]}`)
+        : assert.deepEqual(v, b[j])));
+    });
+  }
+});
+
+function readGIF(bytes) {
+  // a minimal decoder: global palette, one image per frame, LZW
+  assert.equal(String.fromCharCode(...bytes.subarray(0, 6)), 'GIF89a');
+  const w = bytes[6] | (bytes[7] << 8), flags = bytes[10];
+  const palSize = 2 << (flags & 7);
+  const pal = [...bytes.subarray(13, 13 + 3 * palSize)];
+  let o = 13 + 3 * palSize, loop = false;
+  const frames = [];
+  while (bytes[o] !== 0x3b) {
+    if (bytes[o] === 0x21) {
+      if (bytes[o + 1] === 0xff && String.fromCharCode(...bytes.subarray(o + 3, o + 14)) === 'NETSCAPE2.0') loop = true;
+      o += 2;
+      while (bytes[o]) o += bytes[o] + 1;
+      o++;
+      continue;
+    }
+    assert.equal(bytes[o], 0x2c);
+    const min = bytes[o + 10];
+    o += 11;
+    const data = [];
+    while (bytes[o]) { data.push(...bytes.subarray(o + 1, o + 1 + bytes[o])); o += bytes[o] + 1; }
+    o++;
+    const clear = 1 << min, eoi = clear + 1, out = [];
+    let size = min + 1, dict = [], prev = null, bit = 0;
+    const reset = () => { dict = []; for (let i = 0; i < clear; i++) dict[i] = [i]; dict[clear] = []; dict[eoi] = []; size = min + 1; prev = null; };
+    reset();
+    for (;;) {
+      let code = 0;
+      for (let i = 0; i < size; i++, bit++) code |= ((data[bit >> 3] >> (bit & 7)) & 1) << i;
+      if (code === clear) { reset(); continue; }
+      if (code === eoi) break;
+      let entry = code < dict.length ? dict[code] : [...prev, prev[0]];
+      out.push(...entry);
+      if (prev) dict.push([...prev, entry[0]]);
+      prev = entry;
+      if (dict.length === (1 << size) && size < 12) size++;
+    }
+    frames.push(Uint8Array.from(out));
+  }
+  return { w, pal, loop, frames };
+}
+
+test('motion: GIF holds every frame exactly, in the six colours, looping', () => {
+  const M = FIX.motion, size = 128;
+  const frames = [];
+  for (let f = 0; f < FRAMES; f += 3) frames.push(render(frameOps(M.ops, M.prompt, frameTime(f)), M.prompt, size, 0, true).pixels);
+  const g = readGIF(encodeGIF(frames, size, 8));
+  assert.equal(g.w, size);
+  assert.ok(g.loop);
+  assert.deepEqual(g.pal.slice(0, 18), [0, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 0]);
+  assert.equal(g.frames.length, frames.length);
+  g.frames.forEach((f, i) => assert.deepEqual(f, frames[i], `frame ${i}`));
+  // a large noisy frame forces the code table to fill up and restart
+  const noisy = Uint8Array.from({ length: 256 * 256 }, (_, i) => (i * 2654435761 >>> 13) % 6);
+  assert.deepEqual(readGIF(encodeGIF([noisy], 256, 8)).frames[0], noisy);
 });

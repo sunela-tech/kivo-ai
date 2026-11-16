@@ -1,0 +1,87 @@
+# INKOS MOTION 1 - INKOS 1.1 that animates: the same vector-program model,
+# writing colour drawing programs with start times and effects, rendered as a
+# looping six-colour GIF.
+id: inkos_motion1
+name: INKOS MOTION 1
+architecture: inkscript-transformer
+summary: >-
+  INKOS 1.1 that moves. Writes a colour drawing program with a start time and
+  an effect for each part (drawn on, typed, popping in, growing, sliding,
+  spinning, bouncing, blinking) and renders it as a 3-second looping GIF in
+  the six-colour E-Ink palette.
+specialties: [animated notes and lists, growing charts, diagrams built step by step, moving icons and symbols, self-drawing sketches]
+palette: eink6
+media: video
+
+# Training target for this model. A goal, not a claim: the trainer records
+# the number of epochs actually completed.
+target_epochs: 10000
+
+model:
+  d_model: 256
+  n_layers: 8
+  n_heads: 8
+  d_ff: 1024
+  max_prompt: 256
+  max_program: 384
+  dropout: 0.0
+  color: true
+  motion: true           # 16 time-slot and 8 effect tokens after the colour tokens
+
+data:
+  count: 120000
+  val_count: 3000
+  shard_size: 10000
+  seed: 11
+  mix:
+    notes: 0.22
+    charts: 0.18
+    diagrams: 0.16
+    symbols: 0.14
+    icons: 0.14
+    sketches: 0.16
+
+train:
+  # Start from INKOS 1.1's installed weights: it already draws the pictures,
+  # this model learns when and how each part appears. The new animation
+  # tokens start from random values. Its own epoch count starts at zero.
+  init_from: inkos1_1
+  batch_size: 32
+  lr: 4.0e-4
+  min_lr: 4.0e-5
+  warmup_steps: 300
+  schedule_epochs: null
+  weight_decay: 0.02
+  betas: [0.9, 0.98]
+  grad_clip: 1.0
+  ema_decay: 0.999
+  log_every: 20
+  val_every_steps: 750
+  val_batches: 30
+  checkpoint_minutes: 10
+  keep_checkpoints: 2
+  seed: 11
+
+sample:
+  temperature: 0.7
+  top_p: 0.95
+
+motion:
+  frames: 24
+  fps: 8
+
+inference:
+  sizes: [256, 512]
+  default_size: 256
+
+preview_prompts:
+  - "typing blue note Groceries: milk; eggs; bread; coffee"
+  - "growing colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9"
+  - "step by step colorful flowchart: Start -> Check -> Done"
+  - "spinning yellow sun"
+  - "bouncing red heart"
+  - "drawing green sketch of a tree"
+  - "popping colorful mind map: Project; Design; Build; Test"
+  - "blinking red sign: OPEN"
+  - "sliding black and blue todo: [x] Pay rent; Call Anna"
+  - "animated colorful pie chart: Rent 50, Food 30, Fun 20"

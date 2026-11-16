@@ -73,16 +73,17 @@ export function schedule(steps) {
   return ts;
 }
 
-/** x0 estimate [C,R,R] -> palette indices [R*R] (0 black, 1 white, 2.. colours) */
-export function decide(x0, planes, n) {
+/** x0 estimate [C,R,R] (or frame f of [C,F,R,R]) -> palette indices [R*R] (0 black, 1 white, 2.. colours) */
+export function decide(x0, planes, n, frames = 0, f = 0) {
   const out = new Uint8Array(n);
+  const stride = frames ? frames * n : n, off = frames ? f * n : 0;
   if (planes === 1) {
-    for (let i = 0; i < n; i++) out[i] = x0[i] > 0 ? 0 : 1;          // ink is black
+    for (let i = 0; i < n; i++) out[i] = x0[off + i] > 0 ? 0 : 1;          // ink is black
     return out;
   }
   for (let i = 0; i < n; i++) {
-    let best = 0, bv = x0[i];
-    for (let c = 1; c < planes; c++) { const v = x0[c * n + i]; if (v > bv) { bv = v; best = c; } }
+    let best = 0, bv = x0[off + i];
+    for (let c = 1; c < planes; c++) { const v = x0[c * stride + off + i]; if (v > bv) { bv = v; best = c; } }
     out[i] = best;
   }
   return out;
@@ -123,13 +124,13 @@ export async function upscaleTiled(model, pic, size, tile = 256, overlap = 16) {
 }
 
 /**
- * Generate one picture.
- * -> {pixels: Uint8Array palette indices, size, steps, guidance}
- * onStep(i, steps) after every denoising step; onStage(name) before each refiner pass.
+ * Generate one picture, or one clip with INKOS MOTION 1 Pro (cfg.frames > 0).
+ * -> {pixels: Uint8Array palette indices, size, steps, guidance}, plus frames: [Uint8Array] for a clip
+ * onStep(i, steps) after every denoising step; onStage(size, frame) before each refiner pass.
  */
 export async function generatePro(model, prompt, { size, seed, steps, guidance, noise, onStep, onStage }) {
   const rt = await runtime();
-  const cfg = model.cfg, R = cfg.base_resolution, C = cfg.planes, n = R * R;
+  const cfg = model.cfg, R = cfg.base_resolution, C = cfg.planes, n = R * R, F = cfg.frames || 0;
   const L = cfg.text_length;
   const ids = new BigInt64Array(2 * L);
   ids.set(tokenize(prompt, cfg), 0);
@@ -140,11 +141,11 @@ export async function generatePro(model, prompt, { size, seed, steps, guidance, 
   if (noise) x = Float32Array.from(noise);
   else {
     const rng = new Rng(seed >>> 0);
-    x = new Float32Array(C * n);
+    x = new Float32Array(C * (F || 1) * n);
     for (let i = 0; i < x.length; i++) x[i] = rng.normal();
   }
-  let sc = new Float32Array(C * n);
-  const ts = schedule(steps), shape = [1, C, R, R];
+  let sc = new Float32Array(x.length);
+  const ts = schedule(steps), shape = F ? [1, C, F, R, R] : [1, C, R, R];
   const scalar = (v) => new rt.Tensor('float32', new Float32Array([v]), [1]);
   for (let i = 0; i < steps; i++) {
     const out = await model.sessions.step.run({
@@ -156,11 +157,25 @@ export async function generatePro(model, prompt, { size, seed, steps, guidance, 
     sc = out.x0.data;
     if (onStep) onStep(i + 1, steps);
   }
-  let pic = decide(sc, C, n), s = R;
-  while (s < size) {
-    if (onStage) onStage(s * 2);
-    pic = await upscaleTiled(model, pic, s);
-    s *= 2;
+  const finish = async (pic, f) => {
+    let s = R;
+    while (s < size) {
+      if (onStage) onStage(s * 2, f);
+      pic = await upscaleTiled(model, pic, s);
+      s *= 2;
+    }
+    return [pic, s];
+  };
+  if (!F) {
+    const [pic, s] = await finish(decide(sc, C, n), 0);
+    return { pixels: pic, size: s, steps, guidance };
   }
-  return { pixels: pic, size: s, steps, guidance };
+  const frames = [];
+  let s = R;
+  for (let f = 0; f < F; f++) {
+    const [pic, s2] = await finish(decide(sc, C, n, F, f), f);
+    frames.push(pic);
+    s = s2;
+  }
+  return { pixels: frames[F - 1], frames, size: s, steps, guidance };
 }

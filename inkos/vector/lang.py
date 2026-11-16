@@ -21,7 +21,9 @@ Program (python form)            Tokens
   ("BOX",  x0, y0, x1, y1)       BOX ...                 filled rectangle
   ("ELLI", cx, cy, rx, ry)       ELLI ...                ellipse outline
   ("TEXT", x, y, size, wrap, items)   TEXT x y s w item.. END
-  ("COLOR", k)                   C_BLACK .. C_GREEN      pen colour (INKOS 1.1 only)
+  ("COLOR", k)                   C_BLACK .. C_GREEN      pen colour (INKOS 1.1 and MOTION 1)
+  ("AT", k)                      T0 .. T15               start time of what follows (MOTION 1 only)
+  ("ANIM", effect)               A_STILL .. A_BOUNCE     how what follows appears or moves (MOTION 1 only)
 
 A TEXT item is either a literal string (the model spells it character by
 character) or a span (i, j): "copy characters i..j of the prompt". Spans are
@@ -53,6 +55,16 @@ N_COLORS = 6
 COLOR0 = VOCAB
 VOCAB_COLOR = VOCAB + N_COLORS
 COLOR_NAMES = ("black", "white", "red", "yellow", "blue", "green")
+
+# INKOS MOTION 1 adds animation tokens after the colour tokens: a start time
+# (one of 16 slots across the clip) and an effect. Both apply to the drawing
+# commands that follow, until changed; consecutive commands with the same
+# time and effect move as one group (inkos.vector.motion renders the frames).
+SLOTS = 16
+EFFECTS = ("STILL", "DRAW", "POP", "GROW", "SLIDE", "BLINK", "SPIN", "BOUNCE")
+AT0 = VOCAB_COLOR
+EFFECT0 = AT0 + SLOTS
+VOCAB_MOTION = EFFECT0 + len(EFFECTS)
 
 END = TOK["END"]
 TEXT = TOK["TEXT"]
@@ -94,6 +106,10 @@ def token_name(t: int) -> str:
 
 
 def color_token_name(t: int) -> str:
+    if t >= EFFECT0:
+        return f"A_{EFFECTS[t - EFFECT0]}"
+    if t >= AT0:
+        return f"T{t - AT0}"
     return f"C_{COLOR_NAMES[t - COLOR0].upper()}"
 
 
@@ -104,8 +120,9 @@ def color_token_name(t: int) -> str:
 def encode(ops: list[tuple], vocab: int = VOCAB) -> list[int]:
     """Program -> token ids (no BOS/EOS). Pointer tokens are vocab + index.
 
-    vocab is VOCAB for INKOS 1 and VOCAB_COLOR for INKOS 1.1, whose programs
-    may also contain ("COLOR", k) to change the pen colour.
+    vocab is VOCAB for INKOS 1, VOCAB_COLOR for INKOS 1.1, whose programs
+    may also contain ("COLOR", k) to change the pen colour, and VOCAB_MOTION
+    for MOTION 1, which may also contain ("AT", k) and ("ANIM", effect).
     """
     out: list[int] = []
     for op in ops:
@@ -114,6 +131,10 @@ def encode(ops: list[tuple], vocab: int = VOCAB) -> list[int]:
             if vocab < VOCAB_COLOR:
                 raise ValueError("colour is not part of the black-and-white dialect")
             out.append(COLOR0 + int(op[1]))
+        elif name in ("AT", "ANIM"):
+            if vocab < VOCAB_MOTION:
+                raise ValueError("animation is only part of the MOTION dialect")
+            out.append(AT0 + min(SLOTS - 1, max(0, int(op[1]))) if name == "AT" else EFFECT0 + EFFECTS.index(op[1]))
         elif name == "W":
             out.append(TOK[f"W{int(op[1])}"])
         elif name in STATE_CMDS:
@@ -218,7 +239,7 @@ class Grammar:
                 ptr[:] = True
         elif self.mode == "span_end":
             ptr[self.span_start:] = True
-        if self.V > VOCAB:                        # colour tokens are legal between commands
+        if self.V > VOCAB:                        # colour (and animation) tokens are legal between commands
             extra = np.zeros(self.V - VOCAB, dtype=bool)
             extra[:] = self.mode == "top"
             return np.concatenate([m, extra, ptr])
@@ -234,6 +255,12 @@ class Grammar:
             if t == EOS:
                 self.done = True
                 self.mode = "done"
+                return True
+            if t >= EFFECT0:
+                self.ops.append(("ANIM", EFFECTS[t - EFFECT0]))
+                return True
+            if t >= AT0:
+                self.ops.append(("AT", t - AT0))
                 return True
             if t >= COLOR0:
                 self.ops.append(("COLOR", t - COLOR0))

@@ -16,6 +16,11 @@ export const VOCAB = CHAR0 + N_CHARS;          // INKOS 1
 export const N_COLORS = 6;
 export const COLOR0 = VOCAB;
 export const VOCAB_COLOR = VOCAB + N_COLORS;   // INKOS 1.1
+// INKOS MOTION 1: a start slot (T0..T15) and an effect for the commands that follow
+export const SLOTS = 16;
+export const EFFECTS = ['STILL', 'DRAW', 'POP', 'GROW', 'SLIDE', 'BLINK', 'SPIN', 'BOUNCE'];
+export const AT0 = VOCAB_COLOR, EFFECT0 = AT0 + SLOTS;
+export const VOCAB_MOTION = EFFECT0 + EFFECTS.length;
 export const END = TOK.END, TEXT = TOK.TEXT;
 export const MAX_PATH_POINTS = 96, MAX_TEXT_ITEMS = 96, TEXT_ARGS = 4;
 
@@ -83,6 +88,8 @@ export class Grammar {
     switch (this.mode) {
       case 'top': {
         if (t === EOS) { this.done = true; this.mode = 'done'; return true; }
+        if (t >= EFFECT0) { this.ops.push(['ANIM', EFFECTS[t - EFFECT0]]); return true; }
+        if (t >= AT0) { this.ops.push(['AT', t - AT0]); return true; }
         if (t >= COLOR0) { this.ops.push(['COLOR', t - COLOR0]); return true; }
         const name = NAMES[t];
         if (STATE_CMDS.includes(name)) this.ops.push(name[0] === 'W' ? ['W', +name[1]] : [name]);

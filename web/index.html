@@ -55,15 +55,18 @@
           <div class="grid2">
             <label>Seed <input type="number" id="seed" min="0" max="2147483647" inputmode="numeric" placeholder="random"></label>
             <label data-for="inkscript-transformer">Temperature <input type="number" id="temperature" min="0" max="2" step="0.05" inputmode="decimal"></label>
-            <label data-for="bit-diffusion-unet">Denoising steps <input type="number" id="steps" min="1" max="200" inputmode="numeric"></label>
-            <label data-for="bit-diffusion-unet">Guidance <input type="number" id="guidance" min="0" max="20" step="0.5" inputmode="decimal"></label>
+            <label data-for="bit-diffusion-unet video-diffusion-unet">Denoising steps <input type="number" id="steps" min="8" max="64" inputmode="numeric"></label>
+            <label data-for="bit-diffusion-unet video-diffusion-unet">Guidance <input type="number" id="guidance" min="0" max="20" step="0.5" inputmode="decimal"></label>
             <label>Save to project <select id="project"></select></label>
             <label>New project <span class="row"><input type="text" id="new-project" maxlength="40" placeholder="name"><button type="button" id="add-project" class="small">Add</button></span></label>
           </div>
         </details>
 
         <button type="submit" class="primary" id="generate">Generate</button>
-        <p class="hint" id="quota"></p>
+        <div class="usage">
+          <div class="meter" role="meter" aria-label="Today's usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="usage-meter"><span id="usage-fill"></span></div>
+          <p class="hint" id="quota"></p>
+        </div>
 
         <div class="progress" id="progress" hidden>
           <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><span id="progress-fill"></span></div>
@@ -133,7 +136,10 @@
   <section class="view" id="view-plans" role="tabpanel" aria-labelledby="tab-plans" hidden>
     <div class="toolbar">
       <p class="lead">A plan decides which models can generate, the largest size, and how many images and projects you can have. Plans are a setting stored on this machine: there is no account and no payment. Training is never limited.</p>
-      <span class="count" id="plan-usage"></span>
+      <div class="usage wide">
+        <div class="meter" role="meter" aria-label="Today's usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="plan-meter"><span id="plan-fill"></span></div>
+        <span class="count" id="plan-usage"></span>
+      </div>
     </div>
     <div class="cards three" id="plan-cards"></div>
   </section>

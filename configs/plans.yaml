@@ -1,47 +1,72 @@
-# Plans: three usage tiers for the INKOS app.
+# Plans: four usage tiers for the INKOS app.
 #
-# A plan decides which models may generate, the largest image size, how many
-# images can be made per day and how many projects can exist. Training is
-# never restricted. INKOS has no accounts and takes no payments: the active
-# plan is a setting stored on this machine (settings.json) and is changed on
-# the Plans page or with  python -m inkos plan --set <id>.
+# A plan decides which models may generate, the largest size, the daily usage
+# allowance and how many projects can exist. Training is never restricted.
 #
-# Edit this file to rename plans or change what they include. `price` is
-# only a label shown on the Plans page; leave it null to show nothing.
+# Usage is counted in tokens: every generation costs a number of tokens that
+# grows with the computation it takes (the table under `usage`), and each plan
+# has a daily allowance, shown as a percentage. Allowances reset every day
+# (UTC in INKOS Cloud, local midnight in the Python app).
 #
-# INKOS Cloud (cloud/) uses the same plans, sold through Clerk Billing:
-# `clerk_plan` is the plan's slug in Clerk, and prices are set in Clerk, not
-# here. The cloud app only serves the models it can run in a browser, so the
-# Pro models listed here are ignored there.
-default: basic
+# The Python app has no accounts and takes no payments: the active plan is a
+# setting stored on this machine (settings.json), changed on the Plans page or
+# with  python -m inkos plan --set <id>.  INKOS Cloud (cloud/) sells the same
+# plans through Clerk Billing: `clerk_plan` is the plan's slug in Clerk, and
+# prices are set in Clerk; `price` here is only the label shown in the apps.
+default: free
+
+usage:
+  unit: tokens
+  period: day
+  # tokens for one generation. `image` / `clip` is a flat cost; `per_step` is
+  # multiplied by the number of denoising steps. `sizes` multiplies the cost by
+  # output size (the refiner passes of the Pro models).
+  costs:
+    inkos1:            {image: 1000}
+    inkos1_1:          {image: 1200}
+    inkos1_pro:        {per_step: 1000, sizes: {256: 1.0, 512: 1.1, 1024: 1.4}}
+    inkos1_1_pro:      {per_step: 1100, sizes: {256: 1.0, 512: 1.1, 1024: 1.4}}
+    inkos_motion1:     {clip: 4000, sizes: {256: 1.0, 512: 1.25}}
+    inkos_motion1_pro: {per_step: 3000, sizes: {256: 1.0, 512: 1.3}}
+  steps: {min: 8, max: 64}
 
 plans:
-  - id: basic
+  - id: free
     clerk_plan: free_user           # plan slug in Clerk Billing (INKOS Cloud)
-    name: Basic
-    tagline: Black-and-white notes, lists and simple graphics.
-    price: null
+    name: Free
+    tagline: INKOS 1 for black-and-white notes, lists and simple graphics.
+    price: Free
     models: [inkos1]
     max_size: 512
-    images_per_day: 30
+    tokens_per_day: 30000           # about 30 INKOS 1 pictures
     projects: 1
 
   - id: plus
-    clerk_plan: user_plus           # plan slug in Clerk Billing (INKOS Cloud)
+    clerk_plan: user_plus
     name: Plus
-    tagline: Adds colour with INKOS 1.1 and the 1024 px size.
-    price: null
-    models: [inkos1, inkos1_1]
+    tagline: Colour with INKOS 1.1 and manga with INKOS 1 Pro, with 5x the Free usage.
+    price: $5 / month
+    models: [inkos1, inkos1_1, inkos1_pro]
     max_size: 1024
-    images_per_day: 300
+    tokens_per_day: 150000          # 5x Free
     projects: 10
 
   - id: studio
-    clerk_plan: user_pro           # plan slug in Clerk Billing (INKOS Cloud)
+    clerk_plan: user_pro
     name: Studio
-    tagline: Every model, including both Pro models, without limits.
-    price: null
+    tagline: Colour manga with INKOS 1.1 Pro, with 10x the Free usage.
+    price: $15 / month
     models: [inkos1, inkos1_1, inkos1_pro, inkos1_1_pro]
     max_size: 1024
-    images_per_day: null      # null = unlimited
+    tokens_per_day: 300000          # 10x Free
+    projects: null                  # null = unlimited
+
+  - id: ultra
+    clerk_plan: user_ultra
+    name: Ultra
+    tagline: Video with INKOS MOTION 1 and MOTION 1 Pro, with 10x the Studio usage.
+    price: $199 / month
+    models: [inkos1, inkos1_1, inkos1_pro, inkos1_1_pro, inkos_motion1, inkos_motion1_pro]
+    max_size: 1024
+    tokens_per_day: 3000000         # 10x Studio, 100x Free
     projects: null

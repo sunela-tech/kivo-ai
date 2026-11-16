@@ -41,12 +41,16 @@ class Inkos1Config:
     max_program: int = 320
     dropout: float = 0.0
     color: bool = False            # INKOS 1.1: six extra colour tokens
+    motion: bool = False           # MOTION 1: colour plus animation tokens (time slots and effects)
     vocab: int = lang.VOCAB
 
     @classmethod
     def from_dict(cls, d: dict) -> "Inkos1Config":
         kw = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
-        if kw.get("color"):
+        if kw.get("motion"):
+            kw["color"] = True
+            kw["vocab"] = lang.VOCAB_MOTION
+        elif kw.get("color"):
             kw["vocab"] = lang.VOCAB_COLOR
         return cls(**kw)
 

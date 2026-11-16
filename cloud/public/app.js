@@ -40,7 +40,24 @@ const HINTS = {
   inkos1_1: 'INKOS 1.1 understands the same patterns. Start with a colour instruction: "blue ...", "black and red ..." (text, then marks) or "colorful ...".',
   inkos1_pro: 'INKOS 1 Pro paints black-and-white manga pixel by pixel. Describe a portrait ("manga portrait, girl, long black hair, smiling"), a page of panels or a background. The first run downloads about 115 MB; a graphics processor (WebGPU) makes it much faster.',
   inkos1_1_pro: 'INKOS 1.1 Pro paints in the six E-Ink colours. Describe a portrait, panels or a background; colour words such as "red hair" or "blue uniform" steer the palette. The first run downloads about 115 MB.',
+  inkos_motion1: 'INKOS MOTION 1 makes a 3-second looping GIF. Start with how it moves: "typing ...", "growing ...", "step by step ...", "drawing ...", "popping ...", "sliding ...", "spinning ...", "bouncing ..." or "blinking ...", then a colour and an INKOS 1.1 prompt: "growing colorful bar chart: Mon 3, Tue 7".',
+  inkos_motion1_pro: 'INKOS MOTION 1 Pro makes a 2-second colour manga clip. Start with "color manga animation", then what moves (camera panning right, zooming in, character talking, character swaying, character moving left, falling rain / snow / petals), then tags as for INKOS 1.1 Pro. The first run downloads about 135 MB; it takes much more computation than a picture.',
 };
+
+// usage: every generation costs tokens (configs/plans.yaml); a plan has a daily allowance
+function tokenCost(m, size, steps) {
+  const c = S.app.usage.costs[m.id];
+  if (!c) return 0;
+  const base = c.per_step !== undefined ? c.per_step * steps : (c.image ?? c.clip ?? 0);
+  return Math.round(base * ((c.sizes && (c.sizes[size] ?? c.sizes[String(size)])) || 1));
+}
+const pct = (n, limit) => Math.min(100, (100 * n) / limit);
+function meter(bar, fill, u) {
+  const p = u.limit ? pct(u.tokens, u.limit) : 0;
+  fill.style.width = p.toFixed(1) + '%';
+  bar.setAttribute('aria-valuenow', p.toFixed(0));
+}
+const stepsNow = (m) => (m.engine === 'pro' ? Number($('steps').value) || m.sample.preview_steps || 16 : undefined);
 
 // ---------------------------------------------------------------------------
 // plumbing
@@ -130,9 +147,13 @@ async function refreshMe(skipCache = false) {
 }
 
 function renderQuota() {
-  const u = S.me.usage, p = plan();
-  $('quota').textContent = `${p.name} plan: ${u.images}${u.limit === null ? '' : ' of ' + u.limit} image${(u.limit ?? u.images) === 1 ? '' : 's'} today` +
-    (u.limit === null ? ' (no daily limit)' : '');
+  const u = S.me.usage, p = plan(), m = currentModel();
+  meter($('usage-meter'), $('usage-fill'), u);
+  const cost = m ? tokenCost(m, S.size, stepsNow(m)) : 0;
+  const used = u.limit === null ? `${p.name} plan: ${num(u.tokens)} tokens used today (no daily limit).`
+    : `${p.name} plan: ${pct(u.tokens, u.limit).toFixed(0)}% of today's usage used.`;
+  const each = m && cost ? ` This ${m.media === 'video' ? 'clip' : 'picture'}: ${u.limit ? `about ${Math.max(0.1, pct(cost, u.limit)).toFixed(1)}% of a day's usage (${num(cost)} tokens)` : `${num(cost)} tokens`}.` : '';
+  $('quota').textContent = used + each;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,9 +184,9 @@ function renderModelDependent() {
   $('temperature').placeholder = (m.sample && m.sample.temperature) ?? 0.7;
   document.querySelectorAll('[data-engine]').forEach((el) => { el.hidden = el.dataset.engine !== m.engine; });
   if (m.engine === 'pro') $('guidance').placeholder = m.sample.guidance;
-  const u = S.me.usage, spent = u.limit !== null && u.remaining <= 0;
+  const u = S.me.usage, spent = u.limit !== null && u.tokens + tokenCost(m, S.size, stepsNow(m)) > u.limit;
   $('generate').disabled = S.busy || spent;
-  $('generate').textContent = spent ? 'Daily limit reached' : S.busy ? 'Generating ...' : 'Generate';
+  $('generate').textContent = spent ? 'Not enough usage left today' : S.busy ? 'Generating ...' : 'Generate';
   renderQuota();
 }
 
@@ -183,6 +204,7 @@ $('size-picker').addEventListener('click', (e) => {
   S.size = Number(b.dataset.size);
   renderModelDependent();
 });
+$('steps').addEventListener('change', () => renderModelDependent());
 $('examples').addEventListener('click', (e) => {
   const b = e.target.closest('[data-example]');
   if (b) { $('prompt').value = b.dataset.example; $('prompt').focus(); }
@@ -209,7 +231,7 @@ async function generate(over = {}) {
   const seed = seedIn !== '' && seedIn !== null ? Number(seedIn) >>> 0 : crypto.getRandomValues(new Uint32Array(1))[0] >>> 1;
   const tIn = over.temperature !== undefined ? over.temperature : $('temperature').value;
   const temperature = tIn !== '' && tIn !== null ? Math.min(2, Math.max(0, Number(tIn))) : m.sample.temperature;
-  const steps = Number(over.steps || $('steps').value) || m.sample.preview_steps || 16;
+  const steps = Number(over.steps || $('steps').value) || 16;
   const gIn = over.guidance !== undefined ? over.guidance : $('guidance').value;
   const guidance = gIn !== '' && gIn !== null && Number.isFinite(Number(gIn)) ? Math.min(8, Math.max(1, Number(gIn))) : m.sample.guidance;
   const project = $('project').value || 'default';
@@ -219,13 +241,18 @@ async function generate(over = {}) {
     // the engine keeps loaded models (one Pro model at a time), so this returns at once when it has it
     await engine({ type: 'load', model: m.id, engine: m.engine, token: await token() }, showProgress);
     showProgress({ stage: 'checking your plan', fraction: 0 });
-    const ticket = await api('POST', '/api/generations', { model: m.id, size });
+    const ticket = await api('POST', '/api/generations', m.engine === 'pro' ? { model: m.id, size, steps } : { model: m.id, size });
     S.me.usage = ticket.usage;
     const r = await engine(m.engine === 'pro' ? { type: 'generate', model: m.id, prompt, size, seed, steps, guidance }
       : { type: 'generate', model: m.id, prompt, size, seed, temperature, topP: m.sample.top_p }, showProgress);
     showProgress({ stage: 'saving to your gallery', fraction: 1 });
-    const saved = await api('POST', '/api/gallery', { project, png: b64(r.png), meta: r.meta });
-    showResult(r.png, { ...r.meta, project, id: saved.id, bytes: r.png.length });
+    const meta = { ...r.meta, tokens_used: ticket.cost };
+    let saved = null;
+    try { saved = await api('POST', '/api/gallery', { project, png: b64(r.png), meta }); } catch (e) {
+      if (e.status !== 413) throw e;
+      banner('This clip is too large for the gallery. Download it below.');
+    }
+    showResult(r.png, { ...meta, project, id: saved && saved.id, bytes: r.png.length });
     showProgress({ stage: 'done', fraction: 1 });
   } catch (e) {
     $('progress').hidden = true;
@@ -245,6 +272,8 @@ function factsHTML(meta) {
   }
   if (meta.temperature !== undefined && meta.temperature !== null) rows.push(['Temperature', meta.temperature]);
   if (meta.steps) rows.push(['Denoising', `${meta.steps} steps, guidance ${meta.guidance}`]);
+  if (meta.frames) rows.push(['Clip', `${meta.frames} frames at ${meta.fps} per second (${(meta.frames / meta.fps).toFixed(1)} s), looping GIF`]);
+  if (meta.tokens_used) rows.push(['Usage', `${num(meta.tokens_used)} tokens`]);
   if (meta.seconds) rows.push(['Time', `${meta.seconds} s on this device${meta.backend ? (meta.backend === 'webgpu' ? ' (graphics processor, WebGPU)' : ' (processor, WebAssembly)') : ''}`]);
   if (meta.colors) {
     rows.push(['Colours', Object.entries(meta.colors).filter(([k, v]) => k !== 'white' && v > 0).map(([k, v]) => `${k} ${(100 * v).toFixed(1)}%`).join(', ') || 'none']);
@@ -259,7 +288,8 @@ function factsHTML(meta) {
 
 function showResult(png, meta) {
   for (const u of S.urls.splice(0)) URL.revokeObjectURL(u);
-  const url = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
+  const gif = meta.media === 'gif';
+  const url = URL.createObjectURL(new Blob([png], { type: gif ? 'image/gif' : 'image/png' }));
   S.urls.push(url);
   S.last = meta;
   const img = $('result-img');
@@ -276,7 +306,8 @@ function showResult(png, meta) {
   $('result-notice').hidden = !note;
   $('result-notice').textContent = note;
   $('download').href = url;
-  $('download').setAttribute('download', `inkos-${meta.model}-${meta.seed}.png`);
+  $('download').setAttribute('download', `inkos-${meta.model}-${meta.seed}.${gif ? 'gif' : 'png'}`);
+  $('download').textContent = gif ? 'Download GIF' : 'Download PNG';
 }
 
 $('gen-form').addEventListener('submit', (e) => { e.preventDefault(); generate(); });
@@ -336,7 +367,8 @@ function openDetail(i) {
   $('detail-img').alt = it.meta.prompt;
   setHTML($('detail-facts'), factsHTML({ ...it.meta, created_at: it.created_at, project: it.project }));
   $('detail-download').href = it.url || '#';
-  $('detail-download').setAttribute('download', `inkos-${it.id}.png`);
+  $('detail-download').setAttribute('download', `inkos-${it.id}.${it.meta.media === 'gif' ? 'gif' : 'png'}`);
+  $('detail-download').textContent = it.meta.media === 'gif' ? 'Download GIF' : 'Download PNG';
   $('detail').scrollIntoView({ block: 'nearest' });
 }
 function closeDetail() { S.detail = null; $('detail').hidden = true; }
@@ -378,6 +410,7 @@ function renderModels() {
         <tr><th>Parameters</th><td class="num">${(m.params / 1e6).toFixed(2)} million</td></tr>
         <tr><th>Download</th><td class="num">${(m.weights_bytes / 1e6).toFixed(1)} MB, once per device</td></tr>
         <tr><th>Runs on</th><td class="num">${m.engine === 'pro' ? 'onnxruntime-web: WebGPU, else WebAssembly' : 'JavaScript, any browser'}</td></tr>
+        <tr><th>Makes</th><td class="num">${m.media === 'video' ? `looping GIF, ${m.motion.frames} frames at ${m.motion.fps} per second` : 'PNG picture'}</td></tr>
         <tr><th>Sizes</th><td class="num">${m.sizes.join(', ')} px</td></tr></table></section>`
         : `<section><p>These weights are not installed on the server yet. The model runs in the INKOS Python app.</p></section>`}
       <section><h3>Built for</h3><div class="tags">${m.specialties.map((s) => `<span>${esc(s)}</span>`).join('')}</div>
@@ -389,11 +422,15 @@ function renderModels() {
 
 function renderPlans() {
   const u = S.me.usage;
-  $('plan-usage').textContent = `Used today: ${u.images}${u.limit === null ? ' (no daily limit)' : ' of ' + u.limit + ' images'}`;
+  meter($('plan-meter'), $('plan-fill'), u);
+  $('plan-usage').textContent = u.limit === null ? `Used today: ${num(u.tokens)} tokens (no daily limit)`
+    : `Used today: ${pct(u.tokens, u.limit).toFixed(0)}% (${num(u.tokens)} of ${num(u.limit)} tokens)`;
   const names = (ids) => ids.map((id) => modelById(id).name).join(', ');
-  setHTML($('plan-limits'), `<thead><tr><th>Plan</th><th>Models</th><th>Largest size</th><th>Images per day</th><th>Projects</th></tr></thead><tbody>` +
+  const free = S.app.plans.find((p) => p.id === S.app.default_plan) || S.app.plans[0];
+  setHTML($('plan-limits'), `<thead><tr><th>Plan</th><th>Price</th><th>Models</th><th>Largest size</th><th>Usage per day</th><th>Projects</th></tr></thead><tbody>` +
     S.app.plans.map((p) => `<tr class="${p.id === plan().id ? 'current' : ''}"><th>${esc(p.name)}${p.id === plan().id ? ' (yours)' : ''}</th>
-      <td>${esc(names(p.models))}</td><td>${p.max_size} px</td><td>${p.images_per_day === null ? 'unlimited' : num(p.images_per_day)}</td>
+      <td>${esc(p.price || '')}</td><td>${esc(names(p.models))}</td><td>${p.max_size} px</td>
+      <td>${p.tokens_per_day === null ? 'unlimited' : `${num(p.tokens_per_day)} tokens${p.id === free.id ? '' : ` (${Math.round(p.tokens_per_day / free.tokens_per_day)}x ${esc(free.name)})`}`}</td>
       <td>${p.projects === null ? 'unlimited' : num(p.projects)}</td></tr>`).join('') + '</tbody>');
   if (!S.pricingMounted && S.clerk.mountPricingTable) {
     S.clerk.mountPricingTable($('pricing'), { appearance: APPEARANCE });

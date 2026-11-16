@@ -24,6 +24,7 @@ const supersample = (size) => (size <= 256 ? 4 : size <= 512 ? 3 : 2);
 // font
 
 export function setFont(f) { FONT = f; }
+export const fontMetrics = () => ({ adv: FONT.adv, lineH: FONT.line_h });
 let FONT = null;
 
 export function charsPerLine(size, wrap) {
@@ -124,7 +125,7 @@ function dashPath(p, on = 2.4, off = 1.8) {
   return out;
 }
 
-function ellipsePoints(cx, cy, rx, ry, start = 0, turns = 1) {
+export function ellipsePoints(cx, cy, rx, ry, start = 0, turns = 1) {
   const n = Math.trunc(Math.min(96, Math.max(16, (2.2 * Math.PI * Math.max(rx, ry, 1)) / 1.0)));
   const out = [];
   for (let i = 0; i <= n; i++) {

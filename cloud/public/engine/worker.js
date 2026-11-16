@@ -5,7 +5,9 @@
 // Messages out: {id, type: 'progress', stage, fraction, detail}
 //               {id, type: 'loaded' | 'result' | 'error', ...}
 
+import { encodeGIF } from './gif.js';
 import { describe, normalizePrompt } from './lang.js';
+import { FPS, FRAMES, frameOps, frameTime, isAnimated } from './motion.js';
 import { generate, loadModel } from './model.js';
 import { encodePNG } from './png.js';
 import { generatePro, loadPro } from './pro.js';
@@ -88,7 +90,8 @@ async function loadProModel(msg) {
   }
   post({ id: msg.id, type: 'progress', stage: 'starting the model', fraction: 1, detail: '' });
   const pro = await loadPro(manifest, files);
-  return { kind: 'pro', pro, info: { name: manifest.name, training: manifest.training, backend: pro.backend, params: manifest.params } };
+  return { kind: 'pro', pro, info: { name: manifest.name, training: manifest.training, backend: pro.backend, params: manifest.params,
+    motion: manifest.motion } };
 }
 
 async function load(msg) {
@@ -120,19 +123,22 @@ async function runPro(msg, m) {
   const cfg = m.pro.cfg, color = cfg.planes > 1;
   const prompt = normalizePrompt(msg.prompt, cfg.max_prompt);
   const ups = Math.round(Math.log2(msg.size / cfg.base_resolution));
-  const share = 1 - 0.08 * ups;
+  const F = cfg.frames || 0;
+  const share = F ? 0.8 : 1 - 0.08 * ups;
   const res = await generatePro(m.pro, prompt, {
     size: msg.size, seed: msg.seed, steps: msg.steps, guidance: msg.guidance,
     onStep: (i, n) => post({ id: msg.id, type: 'progress', stage: 'denoising', fraction: share * i / n, detail: `step ${i} of ${n}` }),
-    onStage: (s) => post({ id: msg.id, type: 'progress', stage: `refining to ${s} px`, fraction: share + 0.08 * (Math.log2(s / cfg.base_resolution) - 1), detail: '' }),
+    onStage: (s, f) => post({ id: msg.id, type: 'progress', stage: `refining to ${s} px`,
+      fraction: F ? 0.8 + (0.2 * f) / F : share + 0.08 * (Math.log2(s / cfg.base_resolution) - 1), detail: F ? `frame ${f + 1} of ${F}` : '' }),
   });
-  const png = await encodePNG(res.pixels, res.size, color);
+  const fps = (m.info.motion && m.info.motion.fps) || 6;
+  const file = F ? encodeGIF(res.frames, res.size, fps) : await encodePNG(res.pixels, res.size, color);
   const meta = {
     model: msg.model, model_name: m.info.name, prompt, size: res.size, seed: msg.seed, steps: res.steps, guidance: res.guidance,
     backend: m.pro.backend, seconds: Math.round(performance.now() - t0) / 1000, colors: color ? usage(res.pixels) : null,
-    ink: usage(res.pixels), weights: m.info.training,
+    ink: usage(res.pixels), weights: m.info.training, ...(F ? { media: 'gif', frames: F, fps } : {}),
   };
-  post({ id: msg.id, type: 'result', png, meta }, [png.buffer]);
+  post({ id: msg.id, type: 'result', png: file, meta }, [file.buffer]);
 }
 
 async function run(msg) {
@@ -149,6 +155,7 @@ async function run(msg) {
     },
   });
   post({ id: msg.id, type: 'progress', stage: 'rasterising', fraction: 0.93, detail: `${res.tokens.length} tokens` });
+  if (m.cfg.motion) return finishMotion(msg, m, res, prompt, t0);
   const pic = render(res.ops, prompt, msg.size, msg.seed, color);
   const png = await encodePNG(pic.pixels, msg.size, color);
   const meta = {
@@ -158,6 +165,23 @@ async function run(msg) {
     ink: usage(pic.pixels), weights: m.info.training,
   };
   post({ id: msg.id, type: 'result', png, meta }, [png.buffer]);
+}
+
+// INKOS MOTION 1: render the program frame by frame and write a looping GIF
+function finishMotion(msg, m, res, prompt, t0) {
+  const frames = [];
+  for (let f = 0; f < FRAMES; f++) {
+    if (f % 4 === 0) post({ id: msg.id, type: 'progress', stage: 'drawing frames', fraction: 0.9 + (0.08 * f) / FRAMES, detail: `frame ${f + 1} of ${FRAMES}` });
+    frames.push(render(frameOps(res.ops, prompt, frameTime(f)), prompt, msg.size, msg.seed, true).pixels);
+  }
+  const gif = encodeGIF(frames, msg.size, FPS);
+  const meta = {
+    model: msg.model, model_name: m.info.name, prompt, size: msg.size, seed: msg.seed, temperature: msg.temperature,
+    tokens: res.tokens.length, complete: res.complete, program: describe(res.ops), animated: isAnimated(res.ops),
+    seconds: Math.round(performance.now() - t0) / 1000, colors: usage(frames[FRAMES - 1]), ink: usage(frames[FRAMES - 1]),
+    weights: m.info.training, media: 'gif', frames: FRAMES, fps: FPS,
+  };
+  post({ id: msg.id, type: 'result', png: gif, meta }, [gif.buffer]);
 }
 
 self.onmessage = async (e) => {

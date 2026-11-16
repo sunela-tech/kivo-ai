@@ -34,17 +34,21 @@ sys.path.insert(0, str(ROOT))
 from inkos import palette  # noqa: E402
 from inkos.config import load_config  # noqa: E402
 from inkos.vector import font, lang  # noqa: E402
+from inkos.vector import motion as M  # noqa: E402
 from inkos.vector import render as R  # noqa: E402
 
 OUT = ROOT / "cloud" / "public"
-VECTOR_MODELS = ("inkos1", "inkos1_1")         # drawing-program models: a small JavaScript port runs them
-PRO_MODELS = ("inkos1_pro", "inkos1_1_pro")    # pixel diffusion: ONNX graphs run by onnxruntime-web
-ALL_MODELS = VECTOR_MODELS + PRO_MODELS
+VECTOR_MODELS = ("inkos1", "inkos1_1", "inkos_motion1")    # drawing-program models: a small JavaScript port runs them
+PRO_MODELS = ("inkos1_pro", "inkos1_1_pro", "inkos_motion1_pro")   # diffusion: ONNX graphs run by onnxruntime-web
+ALL_MODELS = ("inkos1", "inkos1_pro", "inkos1_1", "inkos1_1_pro", "inkos_motion1", "inkos_motion1_pro")
 
 
-def export_weights(mid: str) -> dict:
+def export_weights(mid: str) -> dict | None:
     cfg = load_config(mid)
     d = ROOT / "models" / mid
+    if not (d / "manifest.json").exists():
+        print(f"{mid}: not installed (python -m inkos export --model {mid}); left out of the cloud app")
+        return None
     man = json.loads((d / "manifest.json").read_text())
     sd = torch.load(d / man["file"], map_location="cpu", weights_only=True)
     tensors, offset, chunks = {}, 0, []
@@ -59,7 +63,9 @@ def export_weights(mid: str) -> dict:
     np.concatenate(chunks).tofile(OUT / "weights" / f"{mid}.bin")
     index = {
         "model": mid, "name": cfg.name, "dtype": "float16", "elements": offset, "tensors": tensors,
-        "config": {**cfg.model.plain(), "vocab": lang.VOCAB_COLOR if cfg.model.get("color") else lang.VOCAB},
+        "config": {**cfg.model.plain(), "vocab": lang.VOCAB_MOTION if cfg.model.get("motion")
+                   else lang.VOCAB_COLOR if cfg.model.get("color") else lang.VOCAB},
+        "motion": cfg.get("motion"),
         "fingerprint": man["fingerprint"], "sha256_pt": man["sha256"], "training": man["training"],
     }
     (OUT / "weights" / f"{mid}.json").write_text(json.dumps(index))
@@ -106,6 +112,7 @@ def export_app(indexes: dict, pros: dict):
              "palette": bool(cfg.get("palette")), "target_epochs": int(cfg.target_epochs),
              "sizes": list(cfg.inference.sizes), "default_size": int(cfg.inference.default_size),
              "examples": list(cfg.preview_prompts), "engine": "pro" if mid in PRO_MODELS else "vector",
+             "media": cfg.get("media", "image"), "motion": cfg.get("motion"),
              "cloud": mid in indexes or mid in pros, "sample": cfg.sample.plain(), "max_prompt": int(cfg.model.max_prompt)}
         if mid in indexes:
             ix = indexes[mid]
@@ -120,7 +127,10 @@ def export_app(indexes: dict, pros: dict):
         "models": models,
         "plans": [{**p, "models": [m for m in p["models"] if m in cloud]} for p in plans["plans"]],
         "default_plan": plans["default"],
+        "usage": plans["usage"],
         "palette": {"names": list(palette.NAMES), "rgb": [list(c) for c in palette.RGB]},
+        "motion": {"FRAMES": M.FRAMES, "FPS": M.FPS, "U_END": M.U_END, "DUR": M.DUR, "SLOTS": lang.SLOTS,
+                   "EFFECTS": list(lang.EFFECTS), "AT0": lang.AT0, "EFFECT0": lang.EFFECT0, "VOCAB_MOTION": lang.VOCAB_MOTION},
         "lang": {"GRID": lang.GRID, "PAD": lang.PAD, "BOS": lang.BOS, "EOS": lang.EOS, "NAMES": lang.NAMES,
                  "COORD0": lang.COORD0, "CHAR0": lang.CHAR0, "VOCAB": lang.VOCAB, "COLOR0": lang.COLOR0,
                  "VOCAB_COLOR": lang.VOCAB_COLOR, "PATH_MIN": lang.PATH_MIN, "FIXED_ARGS": lang.FIXED_ARGS,
@@ -153,7 +163,7 @@ def export_static():
 
 def main():
     check_runtime()
-    indexes = {mid: export_weights(mid) for mid in VECTOR_MODELS}
+    indexes = {mid: ix for mid in VECTOR_MODELS if (ix := export_weights(mid))}
     pros = {mid: pm for mid in PRO_MODELS if (pm := export_pro(mid))}
     export_font()
     export_app(indexes, pros)

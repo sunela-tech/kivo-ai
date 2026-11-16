@@ -1,0 +1,84 @@
+# INKOS MOTION 1 Pro - INKOS 1.1 Pro that moves: video diffusion over clips of
+# six-colour palette frames, with temporal layers added to the U-Net.
+id: inkos_motion1_pro
+name: INKOS MOTION 1 Pro
+architecture: video-diffusion-unet
+summary: >-
+  INKOS 1.1 Pro made to move. Denoises a 12-frame clip of 128 x 128 palette
+  frames under text guidance, with layers that let the frames see each other,
+  then INKOS 1.1 Pro's refiner doubles every frame to 256 or 512. Writes a
+  2-second looping GIF in the six-colour E-Ink palette. Takes far more
+  computation than a still picture.
+specialties: [camera pans and zooms, characters talking and changing expression, characters moving, falling rain snow and petals, colour manga animation]
+palette: eink6
+media: video
+
+# Training target for this model. A goal, not a claim: the trainer records
+# the number of epochs actually completed.
+target_epochs: 20000
+
+model:
+  base_resolution: 128
+  frames: 12
+  patch: 4
+  channels: [64, 128, 256, 384]     # the same U-Net as INKOS 1.1 Pro, so its weights carry over
+  blocks_per_level: 2
+  attn_levels: [2, 3]
+  heads: 8
+  text_dim: 320
+  text_layers: 4
+  text_heads: 8
+  max_prompt: 192
+  self_cond: true
+  refiner_channels: 64
+  refiner_blocks: 8
+  dropout: 0.0
+  colors: 6
+
+data:
+  count: 8000                      # procedural clips
+  val_count: 200
+  shard_size: 250
+  seed: 21
+
+train:
+  # Start from INKOS 1.1 Pro's installed weights (U-Net, text encoder and the
+  # refiner, which stays frozen). The temporal layers start at zero.
+  init_from: inkos1_1_pro
+  batch_size: 4
+  cpu_bf16: true
+  lr: 2.0e-4
+  min_lr: 2.0e-5
+  warmup_steps: 100
+  schedule_epochs: null
+  weight_decay: 0.01
+  betas: [0.9, 0.99]
+  grad_clip: 1.0
+  ema_decay: 0.999
+  caption_dropout: 0.1
+  self_cond_prob: 0.5
+  log_every: 10
+  val_every_steps: 400
+  val_batches: 6
+  checkpoint_minutes: 10
+  keep_checkpoints: 2
+  seed: 21
+
+sample:
+  steps: 24
+  guidance: 3.0
+  preview_steps: 12
+
+motion:
+  frames: 12
+  fps: 6
+
+inference:
+  sizes: [256, 512]                # 128 native; every frame through the refiner once or twice
+  default_size: 256
+
+preview_prompts:
+  - "color manga animation, camera panning right, color manga background, city street"
+  - "color manga animation, character talking, color manga portrait, girl, long red hair"
+  - "color manga animation, falling snow, color anime scenery, night sky, full moon"
+  - "color manga animation, zooming in, color manga portrait, boy, short black hair, smiling"

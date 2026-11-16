@@ -37,7 +37,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from inkos.config import load_config  # noqa: E402
-from inkos.models.inkos1_pro import PAD_ID, Inkos1Pro, ProConfig  # noqa: E402
+from inkos.engine import build_model  # noqa: E402
+from inkos.models.inkos1_pro import PAD_ID, Inkos1Pro  # noqa: E402
 
 OUT = ROOT / "cloud" / "public" / "weights"
 OPSET = 17
@@ -72,6 +73,7 @@ class StepGraph(nn.Module):
         self.color = model.cfg.colors > 1
 
     def forward(self, x, sc, t, ratio, guidance, text, mask, pooled):
+        # x, sc: [1,C,R,R] for a picture, [1,C,F,R,R] for a MOTION clip (softmax over dim 1 either way)
         out = self.unet(torch.cat([x, x]), torch.cat([t, t]), text, mask, pooled, torch.cat([sc, sc]))
         cond, unc = out[0:1], out[1:2]
         logits = unc + guidance * (cond - unc)
@@ -111,7 +113,7 @@ def load_model(mid: str) -> tuple[Inkos1Pro, dict, object]:
     cfg = load_config(mid)
     d = ROOT / "models" / mid
     man = json.loads((d / "manifest.json").read_text())
-    model = Inkos1Pro(ProConfig.from_dict(cfg.model))
+    model = build_model(cfg)
     model.load_state_dict({k: v.float() for k, v in torch.load(d / man["file"], map_location="cpu", weights_only=True).items()})
     return model.eval(), man, cfg
 
@@ -157,7 +159,8 @@ def export_graphs(mid: str) -> dict:
     ids = torch.full((2, L), PAD_ID, dtype=torch.long)
     ids[:, 0] = 96
     ids[0, 1:12] = torch.arange(40, 51)
-    x = torch.randn(1, C, R, R)
+    frames = int(getattr(pc, "frames", 0) or 0)
+    x = torch.randn(1, C, frames, R, R) if frames else torch.randn(1, C, R, R)
     one = torch.ones(1)
     kw = dict(opset_version=OPSET, do_constant_folding=True, dynamo=False)
     from inkos.models import inkos1_pro as P
@@ -186,7 +189,8 @@ def export_graphs(mid: str) -> dict:
         files.append({"name": p.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
     manifest = {
         "model": mid, "name": cfg.name, "format": "onnx", "opset": OPSET, "files": files,
-        "config": {"base_resolution": R, "planes": C, "colors": pc.colors, "max_prompt": pc.max_prompt,
+        "media": cfg.get("media", "image"), "motion": cfg.get("motion"),
+        "config": {"base_resolution": R, "planes": C, "colors": pc.colors, "max_prompt": pc.max_prompt, "frames": frames,
                    "text_length": L, "bos_id": int(ids[0, 0]), "pad_id": PAD_ID, "first_char": 32, "n_chars": 95, "text_dim": D},
         "sample": cfg.sample.plain(), "sizes": list(cfg.inference.sizes), "default_size": int(cfg.inference.default_size),
         "params": int(man["params"]), "fingerprint": man["fingerprint"], "sha256_pt": man["sha256"],
@@ -220,7 +224,9 @@ def check(mid: str, steps: int = 4) -> dict:
 
     # the full sampler with fixed noise, in PyTorch and through the graphs
     R, C, g = model.cfg.base_resolution, model.cfg.planes, 3.0
-    noise = torch.randn(1, C, R, R, generator=torch.Generator().manual_seed(7))
+    frames = int(getattr(model.cfg, "frames", 0) or 0)
+    shape = (1, C, frames, R, R) if frames else (1, C, R, R)
+    noise = torch.randn(*shape, generator=torch.Generator().manual_seed(7))
     ts = torch.linspace(1.0, 0.0, steps + 1).tolist()
     x_t, sc_t = noise.clone(), torch.zeros_like(noise)
     x_o, sc_o = noise.numpy().copy(), np.zeros_like(noise.numpy())
@@ -247,7 +253,7 @@ def check(mid: str, steps: int = 4) -> dict:
 
     # refiner
     with torch.no_grad():
-        pic = torch.from_numpy(pic_o)
+        pic = torch.from_numpy(pic_o[:, 0] if frames else pic_o)
         inp = (F.one_hot(pic, C).permute(0, 3, 1, 2).float() * 2 - 1) if C > 1 else pic.float() * 2 - 1
         ref_t = model.refiner(inp[..., :96, :80]).numpy()
     ref_o = sess["refiner"].run(None, {"x": inp[..., :96, :80].numpy()})[0]

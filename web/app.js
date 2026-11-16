@@ -18,7 +18,12 @@
       'flowchart, mind map, timeline, icon and sketch. Text after the colon is copied onto the page exactly; separate items with ";" or new lines.',
     'bit-diffusion-unet':
       '{name} reads comma-separated tags: kind of picture, subject, hair, expression, outfit, background.',
+    'video-diffusion-unet':
+      '{name} makes a 2-second clip. Start with "color manga animation", then what moves (camera panning right, zooming in, ' +
+      'character talking, character swaying, character moving left, falling rain / snow / petals), then tags as for INKOS 1.1 Pro.',
   };
+  const MOTION_HINT = '{name} makes a 3-second clip. Start with how it moves: "typing ...", "growing ...", "step by step ...", ' +
+    '"drawing ...", "popping ...", "sliding ...", "spinning ...", "bouncing ...", "blinking ...", then a colour and an INKOS 1.1 prompt.';
   const COLOR_HINTS = {
     'inkscript-transformer': ' Start with a colour instruction: "blue ...", "black and red ..." (text, then marks) or "colorful ...".',
     'bit-diffusion-unet': ' Begin with "color" and name colours in the tags: "red hair", "blue eyes", "blue sky".',
@@ -116,23 +121,49 @@
     setHTML($('size-picker'), m.sizes.map((s) =>
       `<button type="button" role="radio" aria-checked="${s === S.size}" data-size="${s}" aria-label="${s} by ${s} pixels" ${s > maxSize ? 'disabled title="Not in your plan"' : ''}>${s} px</button>`).join(''));
     setHTML($('examples'), m.examples.slice(0, 8).map((p) => `<button type="button" data-example="${esc(p)}" title="${esc(p)}">${esc(p)}</button>`).join(''));
-    setText($('prompt-hint'), (HINTS[m.architecture] || '').replace('{name}', m.name) +
-      (m.palette ? COLOR_HINTS[m.architecture] || '' : ''));
+    setText($('prompt-hint'), m.id === 'inkos_motion1' ? MOTION_HINT.replace('{name}', m.name)
+      : (HINTS[m.architecture] || '').replace('{name}', m.name) + (m.palette ? COLOR_HINTS[m.architecture] || '' : ''));
     $('prompt').maxLength = 2000;
-    document.querySelectorAll('[data-for]').forEach((n) => { n.hidden = n.dataset.for !== m.architecture; });
+    document.querySelectorAll('[data-for]').forEach((n) => { n.hidden = !n.dataset.for.split(' ').includes(m.architecture); });
     const d = m.sample_defaults || {};
     $('temperature').placeholder = d.temperature ?? '';
     $('steps').placeholder = d.steps ?? '';
     $('guidance').placeholder = d.guidance ?? '';
     const u = S.status.plan.usage;
-    const spent = u.limit !== null && u.remaining <= 0;
+    const cost = tokenCost(S.status.plan.costs, m.id, S.size, Number($('steps').value) || d.steps);
+    const spent = u.limit !== null && u.tokens + cost > u.limit;
     const ok = !!m.weights && m.in_plan && !spent;
     $('generate').disabled = !ok || S.busy;
-    $('generate').textContent = !m.in_plan ? 'Not in your plan' : !m.weights ? 'No trained weights' : spent ? 'Daily limit reached'
+    $('generate').textContent = !m.in_plan ? 'Not in your plan' : !m.weights ? 'No trained weights' : spent ? 'Not enough usage left today'
       : (S.busy ? 'Generating ...' : 'Generate');
-    setText($('quota'), `${plan.name} plan: ${u.images}${u.limit === null ? '' : ' of ' + u.limit} image${u.limit === 1 ? '' : 's'} today` +
-      (u.limit === null ? ' (no daily limit)' : '') + (m.in_plan ? '' : `. ${m.name} needs another plan: see the Plans tab.`));
+    meter($('usage-meter'), $('usage-fill'), u);
+    setText($('quota'), usageLine(plan, u) + (m.in_plan ? ` This ${m.media === 'video' ? 'clip' : 'picture'}: ${costLine(cost, u)}.`
+      : ` ${m.name} needs another plan: see the Plans tab.`));
   }
+
+  // usage: tokens per generation (configs/plans.yaml), a daily allowance per plan
+  function tokenCost(costs, modelId, size, steps) {
+    const c = costs && costs.costs[modelId];
+    if (!c) return 0;
+    const base = c.per_step !== undefined ? c.per_step * (steps || 16) : (c.image ?? c.clip ?? 0);
+    const f = (c.sizes && (c.sizes[size] ?? c.sizes[String(size)])) || 1;
+    return Math.round(base * f);
+  }
+  function pct(n, limit) { return Math.min(100, (100 * n) / limit); }
+  function meter(bar, fill, u) {
+    const p = u.limit ? pct(u.tokens, u.limit) : 0;
+    fill.style.width = p.toFixed(1) + '%';
+    bar.setAttribute('aria-valuenow', p.toFixed(0));
+  }
+  function usageLine(plan, u) {
+    return u.limit === null ? `${plan.name} plan: ${num(u.tokens)} tokens used today (no daily limit).`
+      : `${plan.name} plan: ${pct(u.tokens, u.limit).toFixed(0)}% of today's usage used.`;
+  }
+  function costLine(cost, u) {
+    return u.limit ? `about ${Math.max(0.1, pct(cost, u.limit)).toFixed(1)}% of a day's usage (${num(cost)} tokens)` : `${num(cost)} tokens`;
+  }
+
+  $('steps').addEventListener('input', () => renderModelDependent());     // the cost depends on the steps
 
   $('model-picker').addEventListener('click', (e) => {
     const b = e.target.closest('[data-model]');
@@ -535,7 +566,10 @@
     if (!S.status) return;
     const P = S.status.plan;
     const u = P.usage;
-    setText($('plan-usage'), `Used today: ${u.images}${u.limit === null ? ' (no daily limit)' : ' of ' + u.limit + ' images'}`);
+    meter($('plan-meter'), $('plan-fill'), u);
+    setText($('plan-usage'), u.limit === null ? `Used today: ${num(u.tokens)} tokens (no daily limit)`
+      : `Used today: ${pct(u.tokens, u.limit).toFixed(0)}% (${num(u.tokens)} of ${num(u.limit)} tokens)`);
+    const free = P.plans.find((p) => p.id === P.default) || P.plans[0];
     setHTML($('plan-cards'), P.plans.map((p) => {
       const on = p.id === P.current;
       const models = S.status.models.map((m) => `<li><b>${p.models.includes(m.id) ? 'yes' : 'no'}</b>${esc(m.name)}${m.palette ? ' (colour)' : ''}</li>`).join('');
@@ -545,7 +579,8 @@
         <section><h3>Models</h3><ul class="plain">${models}</ul></section>
         <section><table>
           <tr><th>Largest size</th><td class="num">${p.max_size ? p.max_size + ' px' : 'any'}</td></tr>
-          <tr><th>Images per day</th><td class="num">${p.images_per_day === null ? 'unlimited' : num(p.images_per_day)}</td></tr>
+          <tr><th>Usage per day</th><td class="num">${p.tokens_per_day === null ? 'unlimited' : num(p.tokens_per_day) + ' tokens' +
+            (p.id !== free.id && free.tokens_per_day ? ` (${Math.round(p.tokens_per_day / free.tokens_per_day)}x ${esc(free.name)})` : '')}</td></tr>
           <tr><th>Projects</th><td class="num">${p.projects === null ? 'unlimited' : num(p.projects)}</td></tr>
           <tr><th>Training</th><td class="num">all models</td></tr></table></section>
         <div class="cta"><button type="button" data-plan="${esc(p.id)}" ${on ? 'disabled' : ''}>${on ? 'In use' : 'Use this plan'}</button></div>
