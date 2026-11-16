@@ -1,9 +1,10 @@
 # INKOS
 
-Four local image models for E-Ink screens: two draw **pure black and white**,
-two draw in the **six-colour E-Ink palette**. All are trained from scratch
-with PyTorch, run fully offline, and are driven from the command line or a
-black-and-white HTML interface with three usage plans.
+Six local models for E-Ink screens: two draw **pure black and white**, two
+draw in the **six-colour E-Ink palette**, and two (**INKOS MOTION**) make
+short looping six-colour GIFs. All are trained from scratch with PyTorch, run
+fully offline, and are driven from the command line or a black-and-white
+HTML interface with four usage plans.
 
 | | INKOS 1 | INKOS 1 Pro | INKOS 1.1 | INKOS 1.1 Pro |
 | --- | --- | --- | --- | --- |
@@ -16,11 +17,23 @@ black-and-white HTML interface with three usage plans.
 | Trains on | a CPU or any GPU | a GPU (8 GB or more) | a CPU or any GPU | a GPU (8 GB or more) |
 | Config | `configs/inkos1.yaml` | `configs/inkos1_pro.yaml` | `configs/inkos1_1.yaml` | `configs/inkos1_1_pro.yaml` |
 
+| | INKOS MOTION 1 | INKOS MOTION 1 Pro |
+| --- | --- | --- |
+| Output | looping GIF, six colours, 24 frames at 8 fps (3 s) | looping GIF, six colours, 12 frames at 6 fps (2 s) |
+| Made for | notes typed letter by letter, growing charts, diagrams built step by step, spinning / bouncing / blinking icons, self-drawing sketches | colour manga clips: camera pans and zooms, characters talking, swaying or moving, falling rain, snow and petals |
+| How it moves | INKOS 1.1's program plus a start time (16 slots) and an effect (draw, pop, grow, slide, blink, spin, bounce) for each part; the rasteriser draws every frame | INKOS 1.1 Pro's U-Net on every frame plus temporal layers (convolution and attention over frames, frame embedding); INKOS 1.1 Pro's refiner per frame |
+| Starts from | INKOS 1.1's weights | INKOS 1.1 Pro's weights (the temporal layers start at zero) |
+| Parameters | 6.69 million | 66.51 million |
+| Sizes | 256, 512 | 128 native, 256 and 512 refined |
+| Training target | 10,000 epochs | 20,000 epochs |
+| Config | `configs/inkos_motion1.yaml` | `configs/inkos_motion1_pro.yaml` |
+
 Black-and-white models write 1-bit PNGs in which every pixel is exactly
 `#000000` or `#FFFFFF`. Colour models write indexed PNGs whose palette holds
 exactly six entries: black `#000000`, white `#FFFFFF`, red `#FF0000`, yellow
 `#FFFF00`, blue `#0000FF` and green `#00FF00`, the pigments of current colour
-E-Ink panels. No output ever contains a grey, a tint or an anti-aliased edge.
+E-Ink panels. No output ever contains a grey, a tint or an anti-aliased edge. The MOTION
+models write GIFs whose colour table holds the same six colours.
 
 ## What is trained and what is not
 
@@ -92,7 +105,7 @@ pip install -r requirements.txt        # torch, numpy, pillow, pyyaml
 ```
 
 ```bash
-python -m inkos doctor                 # hardware check for all four models
+python -m inkos doctor                 # hardware check for all six models
 ```
 
 ```bash
@@ -101,7 +114,7 @@ python -m inkos serve --open           # http://localhost:8765
 
 INKOS 1 and INKOS 1.1 ship with small trained weight files in `models/`, so
 the interface can generate straight away. The two Pro models have to be
-trained first. A new installation starts on the Basic plan, which includes
+trained first. A new installation starts on the Free plan, which includes
 INKOS 1 only; see [Plans](#plans) to switch.
 
 Generate from the command line:
@@ -118,19 +131,37 @@ python -m inkos plan --set plus
 python -m inkos generate --model inkos1_1 --prompt "colorful flowchart: Start -> Check -> Done" --out flow.png
 ```
 
+The MOTION models write a GIF (on the Ultra plan):
+
+```bash
+python -m inkos generate --model inkos_motion1 --prompt "growing colorful bar chart: Mon 3, Tue 7, Wed 5" --out bars.gif
+```
+
 ## Plans
 
-Three plans decide what the app will generate. They are defined in
+Four plans decide what the app will generate. They are defined in
 `configs/plans.yaml` and can be renamed or changed there.
 
-| Plan | Models | Largest size | Images per day | Projects |
-| --- | --- | --- | --- | --- |
-| Basic (default) | INKOS 1 | 512 px | 30 | 1 |
-| Plus | INKOS 1, INKOS 1.1 | 1024 px | 300 | 10 |
-| Studio | all four | 1024 px | unlimited | unlimited |
+| Plan | Price label | Models | Largest size | Usage per day | Projects |
+| --- | --- | --- | --- | --- | --- |
+| Free (default) | free | INKOS 1 | 512 px | 30,000 tokens | 1 |
+| Plus | $5 / month | INKOS 1, INKOS 1.1, INKOS 1 Pro | 1024 px | 150,000 tokens (5x Free) | 10 |
+| Studio | $15 / month | the four image models | 1024 px | 300,000 tokens (10x Free) | unlimited |
+| Ultra | $199 / month | the image models, INKOS MOTION 1 and MOTION 1 Pro | 1024 px | 3,000,000 tokens (10x Studio) | unlimited |
 
-A plan is a setting stored on this machine (`settings.json`); the daily count
-lives in `usage.json`. There are no accounts, license keys or payments:
+Usage is counted in tokens, not images. Every generation costs tokens in
+proportion to the computation it takes, and the apps show the day's usage as
+a percentage bar along with the cost of the next picture or clip:
+
+| Model | Cost |
+| --- | --- |
+| INKOS 1 / INKOS 1.1 | 1,000 / 1,200 tokens a picture |
+| INKOS 1 Pro / INKOS 1.1 Pro | 1,000 / 1,100 tokens per denoising step; x1.1 at 512 px, x1.4 at 1024 px (16 steps at 512 px: 17,600) |
+| INKOS MOTION 1 | 4,000 tokens a clip; x1.25 at 512 px |
+| INKOS MOTION 1 Pro | 3,000 tokens per step; x1.3 at 512 px (16 steps at 256 px: 48,000) |
+
+A plan is a setting stored on this machine (`settings.json`); today's usage
+lives in `usage.json` and resets at local midnight. There are no accounts, license keys or payments:
 switching is one tap on the Plans tab or `python -m inkos plan --set studio`.
 Each plan has an optional `price` label in the config, empty by default,
 which is only displayed. The local server and `python -m inkos generate`
@@ -153,8 +184,9 @@ no internet.
 - **Speed:** about 1–2 seconds per picture on a laptop.
 
 The engine is the same JavaScript as INKOS Cloud, which reproduces the
-PyTorch tokens exactly. The two Pro models are not included: they are
-untrained and far too heavy for a browser.
+PyTorch tokens exactly. The Pro and MOTION models are not included: at 115 MB
+or more each they would make the file too heavy. They run in INKOS Cloud and
+the Python app.
 
 Rebuild it after training or exporting new weights:
 
@@ -168,12 +200,14 @@ The build needs `cd cloud && npm install` once, for esbuild.
 
 ## INKOS Cloud
 
-INKOS 1 and INKOS 1.1 also run as a web app on Cloudflare Workers, with
-sign-in and the three plans sold through Clerk Billing:
+All six models also run as a web app on Cloudflare Workers, with sign-in and
+the four plans sold through Clerk Billing:
 **https://inkos.playcore.workers.dev** (development instance, test-mode
-payments). The models run in the visitor's browser, through a JavaScript port
-that reproduces the PyTorch tokens exactly. The Worker checks the Clerk
-session, applies the plan, counts images and keeps the gallery. Setup,
+payments). The models run in the visitor's browser: INKOS 1, 1.1 and MOTION 1
+through a JavaScript port that reproduces the PyTorch tokens exactly, the Pro
+models as ONNX graphs on onnxruntime-web (WebGPU, or WebAssembly without a
+GPU). The Worker checks the Clerk session, applies the plan, charges usage
+tokens and keeps the gallery. Setup,
 architecture and limitations are in [cloud/README.md](cloud/README.md).
 
 ![INKOS Cloud drawing a note in the browser](docs/cloud-generate.png)
@@ -341,7 +375,7 @@ HTML interface in `web/`:
 * **Training**: epochs completed against the target, samples seen, losses,
   measured speed and time to target, loss curve, latest validation samples,
   the trainer log, and Start / Resume / Stop.
-* **Plans**: the three plans, what each includes, today's image count, and a
+* **Plans**: the four plans, what each includes, today's usage, and a
   button to switch. Models outside the active plan are shown struck through
   in the model selector and lead here.
 
@@ -469,7 +503,7 @@ inkos/
   cli.py            command line
   config.py         config loading, model fingerprint
   palette.py        the six-colour E-Ink palette
-  plans.py          the three plans and their enforcement
+  plans.py          the four plans, usage tokens and their enforcement
   vector/           InkScript language, stroke font, rasteriser
   models/           inkos1.py (INKOS 1, 1.1), inkos1_pro.py (INKOS 1 Pro, 1.1 Pro)
   data/             generators, colour schemes, icon and sketch importers, dataset stores

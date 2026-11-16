@@ -49,8 +49,9 @@ def main():
     cloud_build.main()                                   # refresh cloud/public/{weights,data}
     pub = CLOUD / "public"
     app = json.loads((pub / "data" / "app.json").read_text())
-    for m in app["models"]:                              # the Pro models stay in the cloud and Python apps
-        m["cloud"] = m["cloud"] and m.get("engine") == "vector"
+    for m in app["models"]:                              # the Pro and MOTION models stay in the cloud and Python apps
+        m["cloud"] = m["cloud"] and m["id"] in ("inkos1", "inkos1_1")
+    app["plans"] = [{**p, "models": [x for x in p["models"] if x in ("inkos1", "inkos1_1")]} for p in app["plans"]]
     data = {"app": app, "font": json.loads((pub / "data" / "font.json").read_text()), "version": __version__}
 
     parts = [f'<script type="application/json" id="inkos-data">{safe(json.dumps(data, separators=(",", ":")))}</script>',

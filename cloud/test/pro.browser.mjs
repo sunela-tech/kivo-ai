@@ -84,13 +84,14 @@ self.onmessage = async (e) => {
     const tl = performance.now();
     const noise = new Float32Array((await get('/fixtures/' + model + '/noise.f32')).buffer);
     const out = {};
-    for (const s of size) {
+    for (const s of size.filter((v) => meta.sizes[v])) {
       const t1 = performance.now();
       const r = await generatePro(m, meta.prompt, { size: s, steps: meta.steps, guidance: meta.guidance, noise });
       const want = await get('/fixtures/' + model + '/expected_' + s + '.u8');
-      let same = 0;
-      for (let i = 0; i < want.length; i++) same += r.pixels[i] === want[i];
-      out[s] = { agreement: same / want.length, seconds: (performance.now() - t1) / 1000 };
+      const got = r.frames ? r.frames : [r.pixels];
+      let same = 0, k = 0;
+      for (const fr of got) for (let i = 0; i < fr.length; i++) same += fr[i] === want[k++];
+      out[s] = { agreement: same / want.length, frames: got.length, seconds: (performance.now() - t1) / 1000 };
     }
     self.postMessage({ backend: m.backend, loadSeconds: (tl - t0) / 1000, results: out });
   } catch (err) { self.postMessage({ error: String(err && err.stack || err) }); }

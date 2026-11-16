@@ -294,6 +294,7 @@ def gif_bytes(frames: list, fps: int = FPS) -> bytes:
         im.putpalette(pal)
         ims.append(im)
     buf = io.BytesIO()
-    ims[0].save(buf, format="GIF", save_all=True, append_images=ims[1:], duration=round(1000 / fps), loop=0,
+    delay = int(100 / fps + 0.5) * 10           # GIF delays are whole hundredths of a second (as in the browser's encoder)
+    ims[0].save(buf, format="GIF", save_all=True, append_images=ims[1:], duration=delay, loop=0,
                 optimize=False, disposal=1)
     return buf.getvalue()

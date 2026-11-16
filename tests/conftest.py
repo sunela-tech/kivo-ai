@@ -1,4 +1,4 @@
-"""Shared fixtures: a throw-away INKOS home with tiny versions of all four models."""
+"""Shared fixtures: a throw-away INKOS home with tiny versions of all six models."""
 from __future__ import annotations
 
 import sys
@@ -26,13 +26,23 @@ TINY = {
         "data": {"count": 48, "val_count": 16, "shard_size": 16, "resolution": 128},
         "train": {"batch_size": 8, "val_batches": 1, "warmup_steps": 2, "val_every_steps": 1000, "log_every": 1,
                   "refiner_crop": 32, "lr": 1.0e-3},
-        "sample": {"steps": 3, "preview_steps": 2, "guidance": 2.0},
+        "sample": {"steps": 8, "preview_steps": 2, "guidance": 2.0},           # 8: the smallest the plans allow
         "inference": {"sizes": [64, 128, 256], "default_size": 128},
         "preview_prompts": ["manga portrait, girl"],
     },
 }
 TINY["inkos1_1"] = {**TINY["inkos1"], "preview_prompts": ["red heart", "blue note: milk; eggs"]}
 TINY["inkos1_1_pro"] = {**TINY["inkos1_pro"], "preview_prompts": ["color manga portrait, girl, red hair"]}
+TINY["inkos_motion1"] = {**TINY["inkos1"], "preview_prompts": ["spinning yellow sun", "typing blue note: milk; eggs"]}
+TINY["inkos_motion1_pro"] = {
+    "model": {"base_resolution": 32, "channels": [16, 32], "attn_levels": [1], "heads": 2, "text_dim": 32,
+              "text_layers": 1, "text_heads": 2, "refiner_channels": 8, "refiner_blocks": 1},
+    "data": {"count": 8, "val_count": 4, "shard_size": 4},
+    "train": {"batch_size": 2, "val_batches": 1, "warmup_steps": 2, "val_every_steps": 1000, "log_every": 1, "lr": 1.0e-3},
+    "sample": {"steps": 8, "preview_steps": 2, "guidance": 2.0},
+    "inference": {"sizes": [64, 128], "default_size": 64},
+    "preview_prompts": ["color manga animation, falling snow, color anime scenery"],
+}
 
 
 def _merge(a: dict, b: dict) -> dict:

@@ -9,7 +9,7 @@
     "dev": "wrangler dev",
     "migrate": "wrangler d1 migrations apply inkos --remote",
     "deploy": "python3 build.py && wrangler deploy",
-    "test:pro": "node test/pro.browser.mjs inkos1_pro wasm && node test/pro.browser.mjs inkos1_1_pro wasm",
+    "test:pro": "node test/pro.browser.mjs inkos1_pro wasm && node test/pro.browser.mjs inkos1_1_pro wasm && node test/pro.browser.mjs inkos_motion1_pro wasm",
     "upload": "python3 upload_files.py"
   },
   "devDependencies": {

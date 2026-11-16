@@ -45,14 +45,23 @@ same picture as in the Python app.
 
 The plans are the ones in `configs/plans.yaml`, sold through Clerk Billing:
 
-| Plan | Clerk plan slug | Price (placeholder, test mode) | Models | Largest size | Images per day | Projects |
+| Plan | Clerk plan slug | Price (test mode) | Models | Largest size | Usage per day | Projects |
 | --- | --- | --- | --- | --- | --- | --- |
-| Basic | `free_user` | free | INKOS 1 | 512 px | 30 | 1 |
-| Plus | `user_plus` | $5 / month | INKOS 1, INKOS 1.1 | 1024 px | 300 | 10 |
-| Studio | `user_pro` | $15 / month | INKOS 1, INKOS 1.1, INKOS 1 Pro, INKOS 1.1 Pro | 1024 px | unlimited | unlimited |
+| Free | `free_user` | free | INKOS 1 | 512 px | 30,000 tokens | 1 |
+| Plus | `user_plus` | $5 / month | INKOS 1, INKOS 1.1, INKOS 1 Pro | 1024 px | 150,000 tokens (5x) | 10 |
+| Studio | `user_pro` | $15 / month | + INKOS 1.1 Pro | 1024 px | 300,000 tokens (10x) | unlimited |
+| Ultra | `user_ultra` | $199 / month | + INKOS MOTION 1, INKOS MOTION 1 Pro | 1024 px | 3,000,000 tokens (100x) | unlimited |
 
-Prices are set in Clerk, not in this repository. The two paid plans reuse
-the slugs Clerk's template created, so no plan had to be deleted.
+Prices are set in Clerk, not in this repository. Plus and Studio reuse the
+slugs Clerk's template created; Ultra was created through Clerk's API.
+
+Usage is metered in tokens. `/api/generations` works out the cost from the
+model, the size and (for the Pro models) the number of denoising steps, with
+the table in `configs/plans.yaml` (`src/usage.js`, the same formula as
+`inkos/plans.py`), and charges it in one atomic D1 statement
+(`migrations/0002_tokens.sql`). It refuses the generation when the day's
+allowance would be exceeded. The page shows the day's usage as a percentage
+bar, and the cost of the next generation as a share of the day.
 
 The Worker reads the plan from Clerk's session token, a JWT whose `pla`
 claim holds entries such as `u:user_plus`. It then refuses anything the plan
@@ -60,9 +69,10 @@ does not include:
 
 - the weights of a model that is not in the plan;
 - a size above the plan's limit;
-- an image beyond the day's allowance, counted atomically in D1;
+- a generation beyond the day's token allowance, charged atomically in D1;
 - a project beyond the plan's limit;
-- a gallery upload larger than the plan allows.
+- a gallery upload larger than the plan allows (PNG up to 512 KB, a MOTION
+  GIF up to 1.9 MB, inside D1's 2 MB row limit).
 
 No Clerk secret key is involved. Tokens are checked against the instance's
 public signing keys, and their issuer, expiry and authorised party are
@@ -111,7 +121,13 @@ Put the two ids into `wrangler.jsonc`, then:
 npx wrangler d1 migrations apply inkos --remote
 ```
 
-Every deployment:
+Every deployment (apply the migrations again whenever `migrations/` gains a
+file; applied ones are skipped):
+
+```bash
+npx wrangler d1 migrations apply inkos --remote
+```
+
 
 ```bash
 ./upload_weights.sh
@@ -188,7 +204,8 @@ user it got:
   PNG was drawn in the browser (about 1 s).
 - **Records:** the image was counted (1 of 30) and saved to the gallery.
 
-The pricing table renders the three plans from Clerk Billing.
+The pricing table rendered the plans from Clerk Billing (at the time,
+three; Ultra was added later).
 
 **Not verified here:** paying for Plus or Studio through Clerk's checkout.
 Clerk's bot protection rightly blocks automated browsers, so test an upgrade

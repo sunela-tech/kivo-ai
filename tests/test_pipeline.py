@@ -242,8 +242,14 @@ def test_plans_limit_generation_but_not_training(home):
     _train("inkos1", max_steps=3)                                          # training needs no plan
     export.export(cfg)
     s = plans.summary()
-    assert s["current"] == "basic" and [p["id"] for p in s["plans"]] == ["basic", "plus", "studio"]
-    assert s["plans"][0]["models"] == ["inkos1"] and s["plans"][2]["images_per_day"] is None
+    assert s["current"] == "free" and [p["id"] for p in s["plans"]] == ["free", "plus", "studio", "ultra"]
+    assert s["plans"][0]["models"] == ["inkos1"] and s["plans"][1]["models"] == ["inkos1", "inkos1_1", "inkos1_pro"]
+    assert [p["tokens_per_day"] for p in s["plans"]] == [30000, 150000, 300000, 3000000]       # 1x, 5x, 10x, 10x Studio
+    assert "inkos_motion1_pro" in s["plans"][3]["models"] and "inkos_motion1" not in s["plans"][2]["models"]
+    assert plans.cost("inkos1", 512) == 1000 and plans.cost("inkos1_pro", 512, 16) == 17600
+    assert plans.cost("inkos_motion1_pro", 256, 16) == 48000
+    with pytest.raises(plans.PlanError):
+        plans.cost("inkos1_pro", 512, 4)                                    # steps out of range
 
     srv = server.make_server("127.0.0.1", 0, "cpu")
     base = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -264,22 +270,24 @@ def test_plans_limit_generation_but_not_training(home):
 
     try:
         _, st, _ = _call(base, "GET", "/api/status")
-        assert {m["id"]: m["in_plan"] for m in st["models"]} == {"inkos1": True, "inkos1_pro": False, "inkos1_1": False, "inkos1_1_pro": False}
+        assert {m["id"]: m["in_plan"] for m in st["models"]} == {"inkos1": True, "inkos1_pro": False, "inkos1_1": False, "inkos1_1_pro": False,
+                                                                  "inkos_motion1": False, "inkos_motion1_pro": False}
         code, msg = refused({"model": "inkos1_1", "prompt": "red heart"})
-        assert code == 403 and "INKOS 1.1 is not part of the Basic plan" in msg
+        assert code == 403 and "INKOS 1.1 is not part of the Free plan" in msg
         code, msg = refused({"model": "inkos1", "prompt": "note: a", "size": 1024})
         assert code == 403 and "up to 512 px" in msg
-        with pytest.raises(urllib.error.HTTPError) as e:                    # Basic holds one project
+        with pytest.raises(urllib.error.HTTPError) as e:                    # Free holds one project
             _call(base, "POST", "/api/projects", {"name": "second"})
         assert e.value.code == 403
 
         assert generate({"model": "inkos1", "prompt": "note: a", "size": 256})["status"] == "done"
-        assert _call(base, "GET", "/api/plans")[1]["usage"] == {"date": time.strftime("%Y-%m-%d"), "images": 1, "limit": 30, "remaining": 29}
-        (home / "usage.json").write_text(json.dumps({"date": time.strftime("%Y-%m-%d"), "images": 30}))
+        assert _call(base, "GET", "/api/plans")[1]["usage"] == {"date": time.strftime("%Y-%m-%d"), "tokens": 1000, "images": 1,
+                                                                 "limit": 30000, "remaining": 29000, "percent": 3.3}
+        (home / "usage.json").write_text(json.dumps({"date": time.strftime("%Y-%m-%d"), "tokens": 29500, "images": 30}))
         code, msg = refused({"model": "inkos1", "prompt": "note: a", "size": 256})
-        assert code == 403 and "used up" in msg
-        (home / "usage.json").write_text(json.dumps({"date": "2001-01-01", "images": 30}))   # a new day starts at zero
-        assert plans.images_today() == 0
+        assert code == 403 and "1,000 tokens" in msg and "500" in msg
+        (home / "usage.json").write_text(json.dumps({"date": "2001-01-01", "tokens": 30000}))   # a new day starts at zero
+        assert plans.used_today() == {"tokens": 0, "images": 0}
 
         _, s, _ = _call(base, "POST", "/api/plan", {"plan": "plus"})
         assert s["current"] == "plus" and json.loads((home / "settings.json").read_text())["plan"] == "plus"
@@ -293,6 +301,48 @@ def test_plans_limit_generation_but_not_training(home):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_motion_models_train_and_make_gifs(home):
+    """MOTION 1 and MOTION 1 Pro: data, a few training steps, export, and a looping six-colour GIF."""
+    import io
+
+    from PIL import Image, ImageSequence
+
+    from inkos import export, plans
+    from inkos.data import prepare
+    from inkos.engine import Engine
+    from inkos.vector import lang
+    for mid in ("inkos_motion1", "inkos_motion1_pro"):
+        cfg = load_config(mid)
+        prepare.prepare(cfg, workers=1, download=False)
+        _, _, status = _train(mid, max_steps=2)
+        export.export(cfg)
+    meta = json.loads((paths.data_dir("inkos_motion1") / "meta.json").read_text())
+    assert meta["vocab"] == lang.VOCAB_MOTION and meta["motion"] is True
+    clips = json.loads((paths.data_dir("inkos_motion1_pro") / "meta.json").read_text())
+    assert clips["frames"] == 12 and clips["train_count"] == 8
+
+    plans.set_plan("studio")
+    with pytest.raises(plans.PlanError):                                     # MOTION is Ultra only
+        plans.check_generate("inkos_motion1", "INKOS MOTION 1", 256)
+    plans.set_plan("ultra")
+    assert plans.check_generate("inkos_motion1_pro", "INKOS MOTION 1 Pro", 64, 8) == 24000
+
+    eng = Engine("cpu")
+    for mid, size, frames in (("inkos_motion1", 256, 24), ("inkos_motion1_pro", 64, 12)):
+        res = eng.generate(mid, "spinning yellow sun" if mid == "inkos_motion1" else "color manga animation, zooming in",
+                           size=size, seed=3)
+        assert res["meta"]["media"] == "gif" and res["meta"]["frames"] == frames
+        gif = Image.open(io.BytesIO(res["video"]))
+        assert gif.size == (size, size) and gif.info.get("loop") == 0
+        assert gif.getpalette()[:18] == [0, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 255, 0]
+        total = 0
+        for f in ImageSequence.Iterator(gif):                               # Pillow merges identical frames,
+            total += f.info["duration"]                                       # adding up their durations
+            rgb = {tuple(c) for c in np.asarray(f.convert("RGB")).reshape(-1, 3).tolist()}
+            assert rgb <= {(0, 0, 0), (255, 255, 255), (255, 0, 0), (255, 255, 0), (0, 0, 255), (0, 255, 0)}
+        assert total == frames * int(100 / res["meta"]["fps"] + 0.5) * 10
 
 
 def _call(base, method, path, body=None, header=True):

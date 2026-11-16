@@ -23,7 +23,8 @@ from inkos.prompts import normalize_prompt  # noqa: E402
 from pro_onnx import load_model  # noqa: E402
 
 PROMPTS = {"inkos1_pro": "manga portrait, girl, long black hair, smiling, sailor uniform",
-           "inkos1_1_pro": "colorful manga portrait, girl, red hair, blue sailor uniform"}
+           "inkos1_1_pro": "colorful manga portrait, girl, red hair, blue sailor uniform",
+           "inkos_motion1_pro": "color manga animation, character talking, color manga portrait, girl, long red hair"}
 STEPS, GUIDANCE, SEED = 4, 3.0, 7
 
 
@@ -39,22 +40,37 @@ def main(mids):
         model, _, _ = load_model(mid)
         color = model.cfg.colors > 1
         R, C = model.cfg.base_resolution, model.cfg.planes
+        frames = int(getattr(model.cfg, "frames", 0) or 0)
         prompt = normalize_prompt(PROMPTS[mid], model.cfg.max_prompt)
         out = Path(__file__).parent / "pro-fixtures" / mid
         out.mkdir(parents=True, exist_ok=True)
-        noise = torch.randn(1, C, R, R, generator=torch.Generator().manual_seed(SEED))
+        shape = (1, C, frames, R, R) if frames else (1, C, R, R)
+        noise = torch.randn(*shape, generator=torch.Generator().manual_seed(SEED))
         noise.numpy().astype("<f4").tofile(out / "noise.f32")
         with torch.no_grad():
             pic = model.sample([prompt], steps=STEPS, guidance=GUIDANCE, generator=torch.Generator().manual_seed(SEED))
             sizes = {}
-            for size in (256, 512, 1024):
+            if frames:                                       # a clip: every frame, refined frame by frame
+                clip = pic[0]
+                for size in (256, 512):
+                    ups = {R * 2: 1, R * 4: 2}[size]
+                    out_frames = []
+                    for f in range(frames):
+                        p = clip[f: f + 1]
+                        for _ in range(ups):
+                            p = upscale_tiled(model, p)
+                        out_frames.append(p[0].numpy().astype(np.uint8))
+                    a = np.stack(out_frames)
+                    a.tofile(out / f"expected_{size}.u8")
+                    sizes[size] = {"black": float((a == 0).mean())}
+            for size in (() if frames else (256, 512, 1024)):
                 if size > R:
                     pic = upscale_tiled(model, pic)
                 a = indices(pic, color)
                 a.tofile(out / f"expected_{size}.u8")
                 sizes[size] = {"black": float((a == 0).mean())}
         (out / "meta.json").write_text(json.dumps({"model": mid, "prompt": prompt, "steps": STEPS, "guidance": GUIDANCE,
-                                                   "planes": C, "sizes": sizes}, indent=1))
+                                                   "planes": C, "frames": frames, "sizes": sizes}, indent=1))
         print(mid, sizes)
 
 
