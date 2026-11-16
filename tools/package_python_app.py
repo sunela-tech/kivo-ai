@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from inkos import __version__  # noqa: E402
 
-INCLUDE = ("inkos/", "configs/", "web/", "tests/", "models/inkos1/", "models/inkos1_1/", "docs/",
+INCLUDE = ("inkos/", "configs/", "web/", "tests/", "models/inkos1/", "models/inkos1_1/", "models/inkos_motion1/", "docs/",
            "README.md", "DATA_LICENSES.md", "requirements.txt", "pyproject.toml", "start.sh", "start.command", "start.bat")
 EXECUTABLE = {"start.sh", "start.command"}
 
