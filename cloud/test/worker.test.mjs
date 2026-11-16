@@ -186,9 +186,15 @@ test('generation tickets charge tokens against the daily allowance, atomically',
   }
   const studio = await token({ sub: 'user_s', pla: 'u:user_pro' });
   assert.equal((await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos1_1_pro', size: 1024, steps: 32 } })).body.cost, 49280);
-  assert.equal((await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos_motion1', size: 256 } })).status, 400);   // not in the cloud app yet
-  r = await call('GET', '/api/me', { tok: await token({ sub: 'user_u', pla: 'u:user_ultra' }) });
+  r = await call('POST', '/api/generations', { tok: studio, body: { model: 'inkos_motion1', size: 256 } });
+  assert.equal(r.status, 403);                                                       // the MOTION models are Ultra only
+  assert.match(r.body.error, /INKOS MOTION 1 is not part of the Studio plan/);
+  const ultra = await token({ sub: 'user_u', pla: 'u:user_ultra' });
+  r = await call('GET', '/api/me', { tok: ultra });
   assert.deepEqual([r.body.plan.id, r.body.usage.limit], ['ultra', 3000000]);
+  assert.equal((await call('POST', '/api/generations', { tok: ultra, body: { model: 'inkos_motion1', size: 512 } })).body.cost, 5000);
+  assert.equal((await call('POST', '/api/generations', { tok: ultra, body: { model: 'inkos_motion1_pro', size: 256, steps: 16 } })).body.cost, 48000);
+  assert.equal((await call('POST', '/api/generations', { tok: ultra, body: { model: 'inkos_motion1_pro', size: 1024, steps: 16 } })).status, 400);
 
   // concurrent tickets never exceed the allowance
   env.DB.db.prepare("INSERT INTO usage (user_id, day, images, tokens) VALUES ('user_c', ?, 0, 145000)").run(day);

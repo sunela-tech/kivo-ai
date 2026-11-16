@@ -1,0 +1,130 @@
+{
+  "format": 1,
+  "model": "inkos_motion1",
+  "name": "INKOS MOTION 1",
+  "architecture": "inkscript-transformer",
+  "fingerprint": "4c71faa4e6f6",
+  "config": {
+    "id": "inkos_motion1",
+    "name": "INKOS MOTION 1",
+    "architecture": "inkscript-transformer",
+    "summary": "INKOS 1.1 that moves. Writes a colour drawing program with a start time and an effect for each part (drawn on, typed, popping in, growing, sliding, spinning, bouncing, blinking) and renders it as a 3-second looping GIF in the six-colour E-Ink palette.",
+    "specialties": [
+      "animated notes and lists",
+      "growing charts",
+      "diagrams built step by step",
+      "moving icons and symbols",
+      "self-drawing sketches"
+    ],
+    "palette": "eink6",
+    "media": "video",
+    "target_epochs": 10000,
+    "model": {
+      "d_model": 256,
+      "n_layers": 8,
+      "n_heads": 8,
+      "d_ff": 1024,
+      "max_prompt": 256,
+      "max_program": 384,
+      "dropout": 0.0,
+      "color": true,
+      "motion": true
+    },
+    "data": {
+      "count": 120000,
+      "val_count": 3000,
+      "shard_size": 10000,
+      "seed": 11,
+      "mix": {
+        "notes": 0.22,
+        "charts": 0.18,
+        "diagrams": 0.16,
+        "symbols": 0.14,
+        "icons": 0.14,
+        "sketches": 0.16
+      }
+    },
+    "train": {
+      "init_from": "inkos1_1",
+      "batch_size": 32,
+      "lr": 0.0004,
+      "min_lr": 4e-05,
+      "warmup_steps": 300,
+      "schedule_epochs": null,
+      "weight_decay": 0.02,
+      "betas": [
+        0.9,
+        0.98
+      ],
+      "grad_clip": 1.0,
+      "ema_decay": 0.999,
+      "log_every": 20,
+      "val_every_steps": 750,
+      "val_batches": 30,
+      "checkpoint_minutes": 10,
+      "keep_checkpoints": 2,
+      "seed": 11
+    },
+    "sample": {
+      "temperature": 0.7,
+      "top_p": 0.95
+    },
+    "motion": {
+      "frames": 24,
+      "fps": 8
+    },
+    "inference": {
+      "sizes": [
+        256,
+        512
+      ],
+      "default_size": 256
+    },
+    "preview_prompts": [
+      "typing blue note Groceries: milk; eggs; bread; coffee",
+      "growing colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9",
+      "step by step colorful flowchart: Start -> Check -> Done",
+      "spinning yellow sun",
+      "bouncing red heart",
+      "drawing green sketch of a tree",
+      "popping colorful mind map: Project; Design; Build; Test",
+      "blinking red sign: OPEN",
+      "sliding black and blue todo: [x] Pay rent; Call Anna",
+      "animated colorful pie chart: Rent 50, Food 30, Fun 20"
+    ]
+  },
+  "params": 6686464,
+  "dtype": "float16",
+  "file": "weights.pt",
+  "bytes": 13548221,
+  "sha256": "d8632ce61fa64f2ec9ad7e8a29d2c231b9c4bb80bab31e746ddf1ab3b5121ac3",
+  "training": {
+    "model_id": "inkos_motion1",
+    "fingerprint": "4c71faa4e6f6",
+    "epochs_completed": 0,
+    "epoch_progress": 0.3168,
+    "global_step": 1188,
+    "samples_seen": 38016,
+    "dataset_size": 120000,
+    "target_epochs": 10000,
+    "train_seconds": 2768.8,
+    "val": {
+      "token_acc": 0.7060975710550944,
+      "pointer_acc": 0.9860816876093547,
+      "loss": 1.0842996368805566,
+      "at_step": 750,
+      "at_epoch": 0.2
+    },
+    "saved_at": "2026-11-16T15:04:00",
+    "initialised_from": {
+      "model": "inkos1_1",
+      "name": "INKOS 1.1",
+      "epochs_completed": 0,
+      "samples_seen": 69888
+    }
+  },
+  "source_checkpoint": "runs/inkos_motion1/checkpoints/last.pt",
+  "exported_at": "2026-11-16T15:05:15",
+  "inkos_version": "0.1.0",
+  "torch_version": "2.15.0+cu132"
+}

@@ -17,12 +17,13 @@ venv/
 /settings.json
 /usage.json
 
-# Installed inference weights stay local, except the small INKOS 1 and
-# INKOS 1.1 exports (about 13 MB each), which are committed so the interface
-# works after cloning.
+# Installed inference weights stay local, except the small INKOS 1, INKOS 1.1
+# and INKOS MOTION 1 exports (about 13 MB each), which are committed so the
+# interface works after cloning.
 /models/*
 !/models/inkos1/
 !/models/inkos1_1/
+!/models/inkos_motion1/
 
 # packaged downloads (tools/package_python_app.py)
 /dist/
