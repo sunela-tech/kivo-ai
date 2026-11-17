@@ -45,11 +45,11 @@ trainer's status files:
 | Model | Target | Completed | Weights in this repository |
 | --- | --- | --- | --- |
 | INKOS 1 | 10,000 epochs | **1 complete epoch** (330,000 samples, 10,313 steps, 2.5 hours of training) | installed in `models/inkos1/` |
-| INKOS 1 Pro | 20,000 epochs | **0 complete epochs plus 43% of the next** (25,744 samples, 1,609 steps, 2.4 hours of training) | not included (115 MB); served by INKOS Cloud |
+| INKOS 1 Pro | 20,000 epochs | **0 complete epochs plus 61% of the next** (36,656 samples, 2,291 steps, 3.2 hours of training) | not included (115 MB); served by INKOS Cloud |
 | INKOS 1.1 | 10,000 epochs | **0 complete epochs plus 21% of the next** (69,888 samples, 2,184 steps, 41.5 minutes of training) | installed in `models/inkos1_1/` |
-| INKOS 1.1 Pro | 20,000 epochs | **0 complete epochs plus 29% of the next** (20,368 samples, 1,273 steps, 1.6 hours of training) | not included (116 MB); served by INKOS Cloud |
+| INKOS 1.1 Pro | 20,000 epochs | **0 complete epochs plus 46% of the next** (30,416 samples, 1,901 steps, 2.3 hours of training) | not included (116 MB); served by INKOS Cloud |
 | INKOS MOTION 1 | 10,000 epochs | **0 complete epochs plus 32% of the next** (38,016 samples, 1,188 steps, 46.1 minutes of training, starting from INKOS 1.1) | installed in `models/inkos_motion1/` |
-| INKOS MOTION 1 Pro | 20,000 epochs | **1 complete epoch plus 17% of the next** (9,336 clips, 2,334 steps, 3.1 hours of training, starting from INKOS 1.1 Pro) | not included (134 MB); served by INKOS Cloud |
+| INKOS MOTION 1 Pro | 20,000 epochs | **1 complete epoch plus 72% of the next** (13,748 clips, 3,437 steps, 4.5 hours of training, starting from INKOS 1.1 Pro) | not included (134 MB); served by INKOS Cloud |
 
 **INKOS 1** has seen each of its 330,000 training drawings exactly once. Measured on held-out prompts (`python -m inkos eval --model inkos1`): validation loss 1.50, 59% next-token accuracy, 97% pointer accuracy; 89% of freely sampled programs are valid even without the grammar mask; 90% of the requested text strings land on the page exactly.
 
@@ -71,13 +71,13 @@ trainer's status files:
 
 *Sixteen prompts (listed in `docs/samples/inkos1_1.json`) drawn with the installed INKOS 1.1 weights at 512 px.*
 
-**INKOS 1 Pro** and **INKOS 1.1 Pro** were trained with bfloat16 autocast on the CPU (about 3x faster than float32 on this processor) for 2.4 hours and 1.6 hours: 25,744 and 20,368 of their 60,000 training images. INKOS 1 Pro has learned the textures of its training set (screentone dots, hatching, panel borders, speed lines, how much of a page is ink) but not shapes: asked for "two manga characters blushing and looking at each other" it paints a framed panel of black-and-white masses, lines and screentone. INKOS 1.1 Pro has begun to follow colour words ("long red hair" comes out mostly red) but paints flat patches. Neither draws a figure yet.
+**INKOS 1 Pro** and **INKOS 1.1 Pro** were trained with bfloat16 autocast on the CPU (about 3x faster than float32 on this processor) for 3.2 hours and 2.3 hours: 36,656 and 30,416 of their 60,000 training images. INKOS 1 Pro has learned the textures of its training set (screentone dots, hatching, panel borders, speed lines, how much of a page is ink) but not shapes: asked for "two manga characters blushing and looking at each other" it paints a framed panel of black-and-white masses, lines and screentone. INKOS 1.1 Pro has begun to follow colour words ("long red hair" comes out mostly red) but paints flat patches. Neither draws a figure yet.
 
 **INKOS MOTION 1** started from INKOS 1.1 and learned the animation tokens in 46 minutes (validation token accuracy 0.71). It animates what INKOS 1.1 can draw: in `growing colorful bar chart: Mon 3, Tue 7, Wed 5, Thu 9` the bars rise one after another, and in `typing blue note Groceries: milk; eggs; bread` the note types itself letter by letter. It inherits INKOS 1.1's weak spots: `spinning yellow sun` spins, but the shape it spins is not a sun.
 
 ![MOTION 1: growing bar chart](docs/samples/motion1-bars.gif) ![MOTION 1: typing note](docs/samples/motion1-note.gif)
 
-**INKOS MOTION 1 Pro** started from INKOS 1.1 Pro with its temporal layers at zero and has seen all 8,000 of its training clips once, 9,336 clips in all. Where a training clip changes between frames, it now predicts 79% of those pixels right (63% after 1,600 clips), and its colours follow the prompt (a snowy night comes out white, yellow and blue), but its clips are still patches of colour: it has not learned recognisable scenes or coherent motion.
+**INKOS MOTION 1 Pro** started from INKOS 1.1 Pro with its temporal layers at zero and has seen all 8,000 of its training clips once and most of them a second time, 13,748 clips in all. Where a training clip changes between frames, it now predicts about 80% of those pixels right (63% after 1,600 clips), and its colours follow the prompt (a snowy night comes out white, yellow and blue), but its clips are still patches of colour: it has not learned recognisable scenes or coherent motion.
 
 No Pro or MOTION Pro weights are included in the repository (they are 115 MB or more each); INKOS Cloud serves the exported ones. All three diffusion models need a GPU and a long run before they draw anything recognisable, and real, licensed artwork before they can approach professional manga (see [DATA_LICENSES.md](DATA_LICENSES.md)).
 <!-- STATE:END -->

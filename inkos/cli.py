@@ -272,7 +272,7 @@ def main(argv=None):
     v.set_defaults(fn=cmd_serve)
 
     pl = sub.add_parser("plan", help="show the three plans, or switch the active one")
-    pl.add_argument("--set", metavar="ID", help="make this plan active (basic, plus, studio)")
+    pl.add_argument("--set", metavar="ID", help="make this plan active (free, plus, studio, ultra)")
     pl.set_defaults(fn=cmd_plan)
 
     h = sub.add_parser("doctor", help="check hardware and installation")
